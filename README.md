@@ -52,6 +52,7 @@ minikube image build -t web:latest ./web -p incident-board
 ### 4. Deploy dell'Infrastruttura
 Applica i file manifest di Kubernetes per avviare l'infrastruttura (MongoDB, Redis, API e Web). Esegui il comando puntando alla cartella in cui si trovano i tuoi file .yaml:
 ```
+cd k8s/
 kubectl apply -f . -n app
 ```
 
@@ -63,12 +64,19 @@ Affinché i Change Streams e l'Optimistic Locking funzionino, MongoDB deve opera
 
 Trova il nome del pod di MongoDB (es. mongo-5c4fbc7466-nqx88) ed esegui:
 ```
-kubectl exec -it <NOME_POD_MONGO> -n app -- mongosh --eval "rs.initiate()"
+kubectl exec -it $(kubectl get pod -l app=mongo -n app -o jsonpath="{.items[0].metadata.name}") -n app -- mongosh --eval "rs.initiate()"
 ```
 
-### 6. Accesso all'Applicazione
+### 5. Configurazione del DNS Locale
 
-Una volta che tutti i container sono nello stato Running, utilizza la funzione integrata di Minikube per esporre il servizio frontend. Questo comando aprirà automaticamente l'applicazione nel tuo browser:
+L'Ingress è configurato per rispondere esclusivamente al dominio board.local. Aggiungi questo dominio al tuo file hosts di sistema:
 ```
-minikube service web -n app -p incident-board
+echo "127.0.0.1 board.local" | sudo tee -a /etc/hosts
+```
+
+### 6. Attivazione del Tunnel e Accesso
+
+Mantieni questo terminale aperto per permettere a Minikube di inoltrare il traffico dal tuo computer locale all'Ingress del cluster:
+```
+minikube tunnel -p incident-board
 ```
