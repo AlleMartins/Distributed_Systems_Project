@@ -9,46 +9,42 @@ Il progetto è stato sviluppato come esplorazione pratica dei pattern architettu
 * **State Hydration & Real-time Sync:** I client scaricano uno snapshot iniziale dello storico tramite REST API al login e si iscrivono a un flusso WebSocket per ricevere le modifiche successive (rendendo la UI *Eventually Consistent*).
 * **Optimistic Locking:** Gestione rigorosa delle race condition. Se due operatori tentano di risolvere lo stesso ticket simultaneamente, il backend garantisce la *Strict Consistency* utilizzando il versionamento del database, rifiutando l'aggiornamento obsoleto con un errore HTTP `409 Conflict`.
 * **Cross-Node Event Broadcasting:** Le repliche del backend comunicano tra loro utilizzando un adapter Redis Pub/Sub per diffondere gli eventi WebSocket a tutti i client connessi, scalando orizzontalmente senza perdere messaggi.
-* **Self-Healing & Orchestration:** L'infrastruttura è containerizzata e orchestrata tramite Kubernetes, garantendo il ripristino automatico e la resilienza in caso di crash dei Pod.
+* **High Availability & Self-Healing:** L'infrastruttura è containerizzata e orchestrata tramite Kubernetes. Il database utilizza uno **StatefulSet a 3 nodi con volumi persistenti** per garantire la tolleranza ai guasti (Failover automatico), supportato da PodDisruptionBudget e sonde di Liveness/Readiness sui microservizi.
 
-### 🛠️ Stack Tecnologico
-* **Frontend:** Vue.js, Chart.js
+### Stack Tecnologico
+* **Frontend:** Vue.js, Chart.js, Nginx
 * **Backend:** Node.js, Express.js, Socket.io
-* **Database & Message Broker:** MongoDB (Replica Set), Redis
-* **DevOps & Orchestration:** Docker, Kubernetes (Minikube)
+* **Database & Message Broker:** MongoDB (Stateful Replica Set), Redis
+* **DevOps & Orchestration:** Docker, Kubernetes (Minikube con Ingress Addon)
 
----
-
-## 🚀 Guida all'Avvio (da zero)
+## Guida all'Avvio (Ambiente di Sviluppo Minikube)
 
 ### Prerequisiti
-Assicurati di avere installati sul tuo sistema:
+Assicurati di avere installati e configurati sul tuo sistema:
 * Docker
 * Minikube
 * kubectl
+* Privilegi di amministratore (`sudo`) per configurare il routing locale.
 
-### 1. Avvio del cluster Minikube
-Avvia Minikube creando il profilo dedicato al progetto:
+### 1. Avvio del cluster e dell'Ingress
+Avvia Minikube con un profilo dedicato e abilita l'addon Ingress, necessario per instradare correttamente le chiamate API e WebSocket dallo stesso dominio:
 ```
 minikube start -p incident-board
+minikube addons enable ingress -p incident-board
 ```
 ### 2. Creazione del Namespace
 
 Crea il namespace Kubernetes in cui verranno raggruppati tutti i servizi dell'applicazione:
-
 ```
 kubectl create namespace app
 ```
-
 ### 3. Compilazione delle Immagini Docker
-
 Per evitare di dover scaricare immagini da un registry esterno, compiliamo il backend e il frontend direttamente all'interno del demone Docker di Minikube.
 Dalla cartella principale del progetto, esegui:
 ```
 minikube image build -t api:latest ./api -p incident-board
 minikube image build -t web:latest ./web -p incident-board
 ```
-
 ### 4. Deploy dell'Infrastruttura
 Applica i file manifest di Kubernetes per avviare l'infrastruttura (MongoDB, Redis, API e Web). Esegui il comando puntando alla cartella in cui si trovano i tuoi file .yaml:
 ```
@@ -56,16 +52,8 @@ cd k8s/
 kubectl apply -f . -n app
 ```
 
-Attendi che i Pod vengano creati eseguendo kubectl get pods -n app.
- 
-### 5. Inizializzazione del Replica Set (MongoDB)
+Attendi che i Pod vengano creati eseguendo ```kubectl get pods -n app```.
 
-Affinché i Change Streams e l'Optimistic Locking funzionino, MongoDB deve operare in modalità Replica Set. Se è la primissima volta che avvii il database, devi inizializzarlo.
-
-Trova il nome del pod di MongoDB (es. mongo-5c4fbc7466-nqx88) ed esegui:
-```
-kubectl exec -it $(kubectl get pod -l app=mongo -n app -o jsonpath="{.items[0].metadata.name}") -n app -- mongosh --eval "rs.initiate()"
-```
 
 ### 5. Configurazione del DNS Locale
 
@@ -80,3 +68,6 @@ Mantieni questo terminale aperto per permettere a Minikube di inoltrare il traff
 ```
 minikube tunnel -p incident-board
 ```
+
+### 7. Apri il browser
+Ora apri il tuo browser preferito e naviga all'indirizzo: ```http://board.local ```
