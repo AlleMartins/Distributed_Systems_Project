@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mongo-init
+  namespace: app
+data:
+  init.js: |
+    rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]})
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo
+  namespace: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo
+  template:
+    metadata:
+      labels:
+        app: mongo
+    spec:
+      containers:
+      - name: mongo
+        image: mongo:6
+        args: ["--replSet", "rs0", "--bind_ip_all"]
+        ports:
+        - containerPort: 27017
+      - name: init
+        image: mongo:6
+        command: 
+          - "bash"
+          - "-c"
+          - |
+            echo "In attesa di MongoDB..."
+            until mongosh --host mongo:27017 --eval 'print("up")'; do sleep 2; done
+            echo "Inizializzazione Replica Set..."
+            mongosh --host mongo:27017 /init/init.js || true
+            echo "Inizializzazione completata. Mantenimento del sidecar in vita."
+            sleep infinity
+        volumeMounts:
+        - name: init
+          mountPath: /init
+      volumes:
+      - name: init
+        configMap:
+          name: mongo-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  namespace: app
+spec:
+  selector:
+    app: mongo
+  ports:
+  - port: 27017
+    targetPort: 27017
