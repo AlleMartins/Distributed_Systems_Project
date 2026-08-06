@@ -61,9 +61,8 @@ async function startServer() {
     const changeStream = db.collection('incidents').watch();
     changeStream.on('change', (change) => {
       console.log('Rilevato cambiamento su Mongo:', change.operationType);
-      // Il Redis adapter propaga automaticamente l'emit a tutti i client
-      // su tutte le repliche del cluster Kubernetes.
-      io.emit('incident_update', change);
+      // Usa .local.emit per inviare SOLO ai client connessi a questo specifico Pod
+      io.local.emit('incident_update', change); 
     });
 
     // 5. Gestione Socket.IO
