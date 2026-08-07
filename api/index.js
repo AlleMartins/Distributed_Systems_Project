@@ -67,8 +67,14 @@ async function startServer() {
 
     // 5. Gestione Socket.IO
     io.on('connection', (socket) => {
-      console.log(`Client connesso: ${socket.id}`);
-      socket.on('disconnect', () => console.log(`Client disconnesso: ${socket.id}`));
+      // Estraiamo il nome dall'handshake (o assegniamo 'Anonimo' se assente per sicurezza)
+      const username = socket.handshake.auth.username || 'Anonimo';
+      
+      console.log(`[+] User connesso: ${username} (Socket ID: ${socket.id}) su Replica API`);
+      
+      socket.on('disconnect', () => {
+        console.log(`[-] User disconnesso: ${username}`);
+      });
     });
 
     server.listen(port, () => {

@@ -1,0 +1,20 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-hpa
+  namespace: app
+spec:
+  # Il target da scalare (il nostro deployment delle API)
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 3 # Manteniamo il livello di partenza per l'Alta Affidabilità
+  maxReplicas: 10 # Limite massimo richiesto
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80 # Sgancia lo scale-up se la media supera l'80%
