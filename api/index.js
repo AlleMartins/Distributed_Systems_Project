@@ -3,11 +3,11 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { createClient } = require('redis');
 const { createAdapter } = require('@socket.io/redis-adapter');
-const { MongoClient } = require('mongodb');
+// AGGIUNTO: ObjectId per le query di aggiornamento
+const { MongoClient, ObjectId } = require('mongodb'); 
 const cors = require('cors');
 
 const port = process.env.PORT || 3000;
-// URL interni al cluster Kubernetes
 const mongoUrl = process.env.MONGO_URL || 'mongodb://localhost:27017/app?replicaSet=rs0';
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -16,64 +16,81 @@ app.use(express.json());
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: process.env.CORS_ORIGIN || '*' }
-});
+const io = new Server(server, { cors: { origin: process.env.CORS_ORIGIN || '*' } });
 
 let mongoClient;
 let db;
 
 async function startServer() {
   try {
-    // 1. Setup Redis Adapter per il fanout tra le repliche API
     const pubClient = createClient({ url: redisUrl });
     const subClient = pubClient.duplicate();
     await Promise.all([pubClient.connect(), subClient.connect()]);
     io.adapter(createAdapter(pubClient, subClient));
     console.log('Redis connesso: Adapter Socket.IO configurato.');
 
-    // 2. Connessione a MongoDB Replica Set
     mongoClient = new MongoClient(mongoUrl);
     await mongoClient.connect();
     db = mongoClient.db('app');
     console.log('MongoDB connesso al Replica Set.');
 
-    // 3. Setup rotte REST (montate sotto /api per facilitare l'Ingress)
     const apiRouter = express.Router();
     
+    // Rotta per Creare
     apiRouter.post('/incidents', async (req, res) => {
-      const { title, status, description } = req.body;
+      const { title, status, createdBy } = req.body;
       const result = await db.collection('incidents').insertOne({ 
         title, 
         status: status || 'open', 
-        description, 
+        createdBy: createdBy || 'Anonimo',
         updatedAt: new Date() 
       });
       res.status(201).json({ success: true, id: result.insertedId });
     });
 
-    // Endpoint vitale per Liveness/Readiness probe di Kubernetes
+    // NUOVA ROTTA: Per Aggiornare lo stato
+    apiRouter.patch('/incidents/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { status } = req.body;
+        await db.collection('incidents').updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status, updatedAt: new Date() } }
+        );
+        res.status(200).json({ success: true });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     apiRouter.get('/health', (req, res) => res.status(200).send('OK'));
-    
     app.use('/api', apiRouter);
 
-    // 4. Mongo Change Streams: Il DB diventa l'Event Source
-    const changeStream = db.collection('incidents').watch();
+    // AGGIUNTO: fullDocument: 'updateLookup' per ricevere l'intero documento modificato
+    const changeStream = db.collection('incidents').watch([], { fullDocument: 'updateLookup' });
+    
     changeStream.on('change', (change) => {
-      console.log('Rilevato cambiamento su Mongo:', change.operationType);
-      // Usa .local.emit per inviare SOLO ai client connessi a questo specifico Pod
       io.local.emit('incident_update', change); 
     });
 
-    // 5. Gestione Socket.IO
-    io.on('connection', (socket) => {
-      // Estraiamo il nome dall'handshake (o assegniamo 'Anonimo' se assente per sicurezza)
+    io.on('connection', async (socket) => {
       const username = socket.handshake.auth.username || 'Anonimo';
+      console.log(`[+] User connesso: ${username} (Socket: ${socket.id})`);
       
-      console.log(`[+] User connesso: ${username} (Socket ID: ${socket.id}) su Replica API`);
+      await pubClient.hSet('active_users', socket.id, username);
       
-      socket.on('disconnect', () => {
+      const broadcastActiveUsers = async () => {
+        const usersMap = await pubClient.hGetAll('active_users');
+        const uniqueUsers = [...new Set(Object.values(usersMap))];
+        io.emit('users_update', uniqueUsers);
+      };
+
+      await broadcastActiveUsers();
+
+      socket.on('disconnect', async () => {
         console.log(`[-] User disconnesso: ${username}`);
+        await pubClient.hDel('active_users', socket.id);
+        await broadcastActiveUsers();
       });
     });
 
@@ -89,10 +106,8 @@ async function startServer() {
 
 startServer();
 
-// 6. Graceful Shutdown: Essenziale per testare la Fault Injection senza perdere connessioni
 process.on('SIGTERM', async () => {
-  console.log('Ricevuto segnale SIGTERM (Es. Pod terminato da Kubernetes). Chiusura graceful...');
-  server.close(() => console.log('Traffico HTTP bloccato.'));
+  server.close();
   if (mongoClient) await mongoClient.close();
   process.exit(0);
 });
