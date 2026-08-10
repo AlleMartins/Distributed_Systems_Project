@@ -14,18 +14,35 @@
     </div>
 
     <div v-else class="dashboard-layout">
-      <aside class="sidebar card">
-        <div class="sidebar-header">
-          <h3>🟢 Utenti Online</h3>
-          <span class="badge counter">{{ onlineUsers.length }}</span>
+      <aside class="sidebar">
+        <!-- Card Utenti Online -->
+        <div class="card" style="margin-bottom: 1.5rem;">
+          <div class="sidebar-header">
+            <h3>🟢 Utenti Online</h3>
+            <span class="badge counter">{{ onlineUsers.length }}</span>
+          </div>
+          <ul class="users-list">
+            <li v-for="user in onlineUsers" :key="user" :class="{'current-user': user === username}">
+              <div class="avatar">{{ user.charAt(0).toUpperCase() }}</div>
+              <span class="user-name">{{ user }}</span>
+              <span v-if="user === username" class="you-badge">Tu</span>
+            </li>
+          </ul>
         </div>
-        <ul class="users-list">
-          <li v-for="user in onlineUsers" :key="user" :class="{'current-user': user === username}">
-            <div class="avatar">{{ user.charAt(0).toUpperCase() }}</div>
-            <span class="user-name">{{ user }}</span>
-            <span v-if="user === username" class="you-badge">Tu</span>
-          </li>
-        </ul>
+
+        <!-- Card Grafico a Torta -->
+        <div class="card chart-card">
+          <div class="sidebar-header">
+            <h3>📊 Stato Incidenti</h3>
+          </div>
+          <div v-if="incidents.length === 0" class="empty-chart">
+            Nessun dato
+          </div>
+          <!-- Il grafico appare solo quando ci sono incidenti -->
+          <div v-else class="chart-container">
+            <PieChart :data="chartData" :options="chartOptions" />
+          </div>
+        </div>
       </aside>
 
       <main class="main-content">
@@ -60,12 +77,17 @@
               <div class="incident-info">
                 <span class="incident-title" :class="{ 'resolved-text': inc.status === 'closed' }">{{ inc.title }}</span>
                 <span class="incident-author">Segnalato da: <strong>{{ inc.createdBy || 'Anonimo' }}</strong></span>
+                
+                <!-- Mostra chi ha risolto l'incidente -->
+                <span v-if="inc.status === 'closed' && inc.closedBy" class="incident-author" style="color: #10b981;">
+                  ✓ Risolto da: <strong>{{ inc.closedBy }}</strong>
+                </span>
               </div>
               
               <div class="incident-status-group">
                 <span :class="['badge', inc.status]">{{ inc.status.toUpperCase() }}</span>
                 
-                <button v-if="inc.status === 'open'" @click="resolveIncident(inc._id)" class="resolve-btn" title="Segna come risolto">
+                <button v-if="inc.status === 'open'" @click="resolveIncident(inc)" class="resolve-btn" title="Segna come risolto">
                   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 </button>
               </div>
@@ -79,8 +101,15 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { io } from 'socket.io-client';
+
+// -- IMPORT PER IL GRAFICO CHART.JS --
+import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
+// Usiamo l'alias PieChart per evitare conflitti con tag HTML standard
+import { Pie as PieChart } from 'vue-chartjs';
+
+ChartJS.register(ArcElement, Tooltip, Legend);
 
 const isJoined = ref(false);
 const tempName = ref('');
@@ -91,26 +120,62 @@ const onlineUsers = ref([]);
 
 let socket = null;
 
-const joinBoard = () => {
+// -- LOGICA DEL GRAFICO REATTIVO --
+const chartData = computed(() => {
+  const openCount = incidents.value.filter(i => i.status === 'open').length;
+  const closedCount = incidents.value.filter(i => i.status === 'closed').length;
+  
+  return {
+    labels: ['Aperti', 'Risolti'],
+    datasets: [
+      {
+        backgroundColor: ['#ef4444', '#10b981'], 
+        data: [openCount, closedCount],
+        borderWidth: 0,
+        hoverOffset: 4
+      }
+    ]
+  };
+});
+
+const chartOptions = ref({
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: {
+      position: 'bottom',
+      labels: { font: { family: 'sans-serif' } }
+    }
+  }
+});
+
+const joinBoard = async () => {
   if (!tempName.value.trim()) return;
   username.value = tempName.value.trim();
   isJoined.value = true;
 
+  // 1. RECUPERO STORICO: Carichiamo la "baseline" dal database
+  try {
+    const response = await fetch('/api/incidents');
+    const history = await response.json();
+    incidents.value = history; // Popola la lista e il grafico a torta
+  } catch (err) {
+    console.error("Errore nel recupero dello storico:", err);
+  }
+
+  // 2. SOTTOSCRIZIONE EVENTI: Ci colleghiamo al bus realtime
   socket = io('/', { 
     path: '/socket.io',
     auth: { username: username.value } 
   });
 
   socket.on('incident_update', (change) => {
-    // Gestione dell'inserimento
     if (change.operationType === 'insert') {
       incidents.value.unshift(change.fullDocument);
     } 
-    // AGGIUNTO: Gestione dell'aggiornamento
     else if (change.operationType === 'update') {
       const index = incidents.value.findIndex(inc => inc._id === change.documentKey._id);
       if (index !== -1 && change.fullDocument) {
-        // Sostituisce l'oggetto vecchio con quello aggiornato in tempo reale
         incidents.value[index] = change.fullDocument;
       }
     }
@@ -131,17 +196,30 @@ const createIncident = async () => {
   newTitle.value = '';
 };
 
-// AGGIUNTO: Funzione per inviare la richiesta di chiusura
-const resolveIncident = async (id) => {
-  await fetch(`/api/incidents/${id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: 'closed' })
-  });
+const resolveIncident = async (inc) => {
+  try {
+    const response = await fetch(`/api/incidents/${inc._id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        status: 'closed',
+        version: inc.version,
+        // AGGIUNTO: Inviamo al backend il nome di chi sta cliccando
+        closedBy: username.value 
+      })
+    });
+
+    if (response.status === 409) {
+      alert("⚠️ CONFLITTO! Qualcun altro ha già modificato questo incidente.");
+    }
+  } catch (err) {
+    console.error("Errore di rete:", err);
+  }
 };
 </script>
 
 <style scoped>
+/* Tutto il CSS in un unico file per garanzia di build */
 * { box-sizing: border-box; }
 .app-container { min-height: 100vh; background-color: #f4f7f9; font-family: sans-serif; color: #333; padding: 2rem; display: flex; flex-direction: column; align-items: center; }
 .app-header { text-align: center; margin-bottom: 3rem; }
@@ -168,7 +246,6 @@ h2 { margin-top: 0; font-size: 1.25rem; color: #374151; border-bottom: 2px solid
 .badge { padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 700; }
 .badge.counter { background-color: #e0e7ff; color: #4f46e5; }
 .badge.open { background-color: #fee2e2; color: #dc2626; }
-/* AGGIUNTO: Colore per il badge CLOSED */
 .badge.closed { background-color: #d1fae5; color: #059669; }
 .empty-state { display: flex; flex-direction: column; align-items: center; padding: 3rem 0; color: #6b7280; }
 .spinner { width: 30px; height: 30px; border: 3px solid #f3f4f6; border-top: 3px solid #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 1rem; }
@@ -189,10 +266,17 @@ h2 { margin-top: 0; font-size: 1.25rem; color: #374151; border-bottom: 2px solid
 .user-name { font-weight: 500; font-size: 0.95rem; color: #1f2937; flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .you-badge { background: #3b82f6; color: white; font-size: 0.65rem; padding: 2px 6px; border-radius: 12px; font-weight: bold; }
 .incident-author { font-size: 0.85rem; color: #6b7280; margin-top: 4px; }
-
-/* AGGIUNTO: Stili per il pulsante di spunta e raggruppamento */
 .incident-status-group { display: flex; align-items: center; gap: 0.75rem; }
 .resolve-btn { background-color: #10b981; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.2s, background-color 0.2s; box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2); }
 .resolve-btn:hover { background-color: #059669; transform: scale(1.1); }
 .resolve-btn:active { transform: scale(0.95); }
+
+/* --- CORREZIONE DEL CONTENITORE DEL GRAFICO --- */
+.chart-container { 
+  position: relative; 
+  height: 220px; 
+  width: 100%; 
+  /* Ho rimosso il display: flex che schiacciava il canvas */
+}
+.empty-chart { text-align: center; color: #9ca3af; font-size: 0.9rem; padding: 2rem 0; font-style: italic; }
 </style>

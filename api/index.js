@@ -3,7 +3,6 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { createClient } = require('redis');
 const { createAdapter } = require('@socket.io/redis-adapter');
-// AGGIUNTO: ObjectId per le query di aggiornamento
 const { MongoClient, ObjectId } = require('mongodb'); 
 const cors = require('cors');
 
@@ -43,20 +42,57 @@ async function startServer() {
         title, 
         status: status || 'open', 
         createdBy: createdBy || 'Anonimo',
+        version: 1, // AGGIUNTO: Inizializziamo il contatore di versione
         updatedAt: new Date() 
       });
       res.status(201).json({ success: true, id: result.insertedId });
     });
 
-    // NUOVA ROTTA: Per Aggiornare lo stato
+    // NUOVA ROTTA: Recupero dello storico iniziale (State Hydration)
+    apiRouter.get('/incidents', async (req, res) => {
+      try {
+        // Recupera tutti gli incidenti, ordinati dal più recente al più vecchio
+        const allIncidents = await db.collection('incidents').find({}).sort({ updatedAt: -1 }).toArray();
+        res.status(200).json(allIncidents);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+// Rotta per Aggiornare (con OPTIMISTIC LOCKING + RETROCOMPATIBILITÀ + CHIUSO DA)
     apiRouter.patch('/incidents/:id', async (req, res) => {
       try {
         const { id } = req.params;
-        const { status } = req.body;
-        await db.collection('incidents').updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { status, updatedAt: new Date() } }
+        // AGGIUNTO: Estraiamo closedBy dal body della richiesta
+        const { status, version, closedBy } = req.body; 
+
+        const query = { _id: new ObjectId(id) };
+
+        // Logica di Retrocompatibilità
+        if (version !== undefined && version !== null) {
+          query.version = version;
+        } else {
+          query.version = { $exists: false };
+        }
+
+        // AGGIUNTO: Prepariamo i dati da aggiornare
+        const updateData = { status, updatedAt: new Date() };
+        if (closedBy) {
+          updateData.closedBy = closedBy; // Salviamo chi ha chiuso l'incidente
+        }
+
+        const result = await db.collection('incidents').updateOne(
+          query,
+          { 
+            $set: updateData,
+            $inc: { version: 1 } 
+          }
         );
+
+        if (result.matchedCount === 0) {
+          return res.status(409).json({ error: 'Conflitto! Il documento è stato già modificato o non esiste.' });
+        }
+
         res.status(200).json({ success: true });
       } catch (err) {
         res.status(500).json({ error: err.message });
@@ -66,7 +102,6 @@ async function startServer() {
     apiRouter.get('/health', (req, res) => res.status(200).send('OK'));
     app.use('/api', apiRouter);
 
-    // AGGIUNTO: fullDocument: 'updateLookup' per ricevere l'intero documento modificato
     const changeStream = db.collection('incidents').watch([], { fullDocument: 'updateLookup' });
     
     changeStream.on('change', (change) => {
