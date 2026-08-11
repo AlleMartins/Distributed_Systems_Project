@@ -1,100 +1,112 @@
 <template>
   <div class="app-container">
+    <!-- Schermata di Login (Dark Mode) -->
     <div v-if="!isJoined" class="login-wrapper">
       <div class="card login-card">
         <div class="pulse-indicator" style="margin: 0 auto 1rem auto; width: 40px; height: 40px;"></div>
-        <h2>Entra nella Board</h2>
-        <p class="subtitle" style="margin-bottom: 1.5rem;">Inserisci il tuo nome identificativo per partecipare alla sessione realtime.</p>
+        <h2 class="text-light">Entra nella Board</h2>
+        <p class="subtitle" style="margin-bottom: 1.5rem;">Inserisci il tuo nome per accedere alla Dashboard Realtime.</p>
         
         <div class="input-group">
-          <input v-model="tempName" @keyup.enter="joinBoard" placeholder="Il tuo nome..." class="modern-input" autofocus />
-          <button @click="joinBoard" class="modern-btn" :disabled="!tempName.trim()">Connetti</button>
+          <input v-model="tempName" @keyup.enter="joinBoard" placeholder="Il tuo nome..." class="modern-input dark-input" autofocus />
+          <button @click="joinBoard" class="modern-btn magenta-btn" :disabled="!tempName.trim()">Connetti</button>
         </div>
       </div>
     </div>
 
-    <div v-else class="dashboard-layout">
-      <aside class="sidebar">
-        <!-- Card Utenti Online -->
-        <div class="card" style="margin-bottom: 1.5rem;">
-          <div class="sidebar-header">
-            <h3>🟢 Utenti Online</h3>
-            <span class="badge counter">{{ onlineUsers.length }}</span>
+    <!-- Dashboard Layout (Ispirato all'immagine fornita) -->
+    <div v-else class="dashboard-wrapper">
+      <header class="app-header">
+        <div class="header-titles">
+          <h1>Real time incident management dashboard</h1>
+          <p class="subtitle">Following dashboard illustrates KPI in real-time. Connected as: <strong>{{ username }}</strong></p>
+        </div>
+        <div class="header-status">
+          <div class="pulse-indicator"></div>
+          <span>Live Sync Active</span>
+        </div>
+      </header>
+
+      <main class="dashboard-grid">
+        
+        <!-- COLONNA 1: KPI Cards -->
+        <div class="grid-col kpi-column">
+          <div class="kpi-card">
+            <h3>Total Number of Tickets</h3>
+            <div class="kpi-number text-yellow">{{ totalIncidents }}</div>
           </div>
-          <ul class="users-list">
-            <li v-for="user in onlineUsers" :key="user" :class="{'current-user': user === username}">
-              <div class="avatar">{{ user.charAt(0).toUpperCase() }}</div>
-              <span class="user-name">{{ user }}</span>
-              <span v-if="user === username" class="you-badge">Tu</span>
-            </li>
-          </ul>
+          
+          <div class="kpi-card">
+            <h3>Total Number of Open Tickets</h3>
+            <div class="kpi-number text-yellow">{{ openIncidents }}</div>
+          </div>
+
+          <div class="kpi-card">
+            <h3>Total Number of Resolved Tickets</h3>
+            <div class="kpi-number text-yellow">{{ resolvedIncidents }}</div>
+          </div>
+
+          <div class="kpi-card">
+            <h3>Users Online</h3>
+            <div class="kpi-number text-yellow">{{ onlineUsers.length }}</div>
+          </div>
         </div>
 
-        <!-- Card Grafico a Torta -->
-        <div class="card chart-card">
-          <div class="sidebar-header">
-            <h3>📊 Stato Incidenti</h3>
+        <!-- COLONNA 2: Grafico a Barre e Input -->
+        <div class="grid-col center-column">
+          <div class="card chart-card">
+            <h3 class="card-title">Incidents Status Overview</h3>
+            <div class="chart-container">
+               <!-- Passiamo al BarChart -->
+              <BarChart v-if="totalIncidents > 0" :data="chartData" :options="chartOptions" />
+              <div v-else class="empty-state">No data available</div>
+            </div>
           </div>
-          <div v-if="incidents.length === 0" class="empty-chart">
-            Nessun dato
-          </div>
-          <!-- Il grafico appare solo quando ci sono incidenti -->
-          <div v-else class="chart-container">
-            <PieChart :data="chartData" :options="chartOptions" />
+
+          <div class="card creation-card">
+            <h3 class="card-title">Register New Incident</h3>
+            <div class="input-group">
+              <input v-model="newTitle" @keyup.enter="createIncident" placeholder="Describe the incident..." class="modern-input dark-input" />
+              <button @click="createIncident" class="modern-btn magenta-btn" :disabled="!newTitle.trim()">Submit</button>
+            </div>
           </div>
         </div>
-      </aside>
 
-      <main class="main-content">
-        <header class="app-header">
-          <div class="header-title">
-            <div class="pulse-indicator"></div>
-            <h1>Realtime Incident Board</h1>
+        <!-- COLONNA 3: Feed Realtime (Lista) -->
+        <div class="grid-col right-column">
+          <div class="card list-card">
+            <div class="card-header">
+              <h3 class="card-title">Live Action Feed</h3>
+            </div>
+
+            <div v-if="incidents.length === 0" class="empty-state">
+              <div class="spinner"></div><p>Waiting for events...</p>
+            </div>
+
+            <div class="scrollable-list">
+              <TransitionGroup name="list" tag="ul" class="incident-list">
+                <li v-for="inc in incidents" :key="inc._id" class="incident-item">
+                  <div class="incident-info">
+                    <span class="incident-title" :class="{ 'resolved-text': inc.status === 'closed' }">{{ inc.title }}</span>
+                    <span class="incident-author">Reported by: <strong>{{ inc.createdBy || 'Anonimo' }}</strong></span>
+                    
+                    <span v-if="inc.status === 'closed' && inc.closedBy" class="incident-author text-magenta">
+                      ✓ Resolved by: <strong>{{ inc.closedBy }}</strong>
+                    </span>
+                  </div>
+                  
+                  <div class="incident-status-group">
+                    <span :class="['badge', inc.status]">{{ inc.status.toUpperCase() }}</span>
+                    <button v-if="inc.status === 'open'" @click="resolveIncident(inc)" class="resolve-btn" title="Resolve">
+                      ✓
+                    </button>
+                  </div>
+                </li>
+              </TransitionGroup>
+            </div>
           </div>
-          <p class="subtitle">Connesso come: <strong>{{ username }}</strong></p>
-        </header>
+        </div>
 
-        <section class="card creation-card">
-          <h2>🚨 Segnala Nuovo Incidente</h2>
-          <div class="input-group">
-            <input v-model="newTitle" @keyup.enter="createIncident" placeholder="Es. Latenza elevata sul DB..." class="modern-input" />
-            <button @click="createIncident" class="modern-btn" :disabled="!newTitle.trim()">Broadcast</button>
-          </div>
-        </section>
-
-        <section class="card incidents-card">
-          <div class="card-header">
-            <h2>Log Eventi Live</h2>
-            <span class="badge counter" v-if="incidents.length > 0">{{ incidents.length }} Rilevati</span>
-          </div>
-
-          <div v-if="incidents.length === 0" class="empty-state">
-            <div class="spinner"></div><p>In attesa di eventi...</p>
-          </div>
-
-          <TransitionGroup name="list" tag="ul" class="incident-list">
-            <li v-for="inc in incidents" :key="inc._id" class="incident-item">
-              <div class="incident-info">
-                <span class="incident-title" :class="{ 'resolved-text': inc.status === 'closed' }">{{ inc.title }}</span>
-                <span class="incident-author">Segnalato da: <strong>{{ inc.createdBy || 'Anonimo' }}</strong></span>
-                
-                <!-- Mostra chi ha risolto l'incidente -->
-                <span v-if="inc.status === 'closed' && inc.closedBy" class="incident-author" style="color: #10b981;">
-                  ✓ Risolto da: <strong>{{ inc.closedBy }}</strong>
-                </span>
-              </div>
-              
-              <div class="incident-status-group">
-                <span :class="['badge', inc.status]">{{ inc.status.toUpperCase() }}</span>
-                
-                <button v-if="inc.status === 'open'" @click="resolveIncident(inc)" class="resolve-btn" title="Segna come risolto">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                </button>
-              </div>
-
-            </li>
-          </TransitionGroup>
-        </section>
       </main>
     </div>
   </div>
@@ -104,12 +116,12 @@
 import { ref, computed } from 'vue';
 import { io } from 'socket.io-client';
 
-// -- IMPORT PER IL GRAFICO CHART.JS --
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
-// Usiamo l'alias PieChart per evitare conflitti con tag HTML standard
-import { Pie as PieChart } from 'vue-chartjs';
+// -- IMPORT PER IL GRAFICO A BARRE (invece della torta) --
+import { Chart as ChartJS, Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
+import { Bar as BarChart } from 'vue-chartjs';
 
-ChartJS.register(ArcElement, Tooltip, Legend);
+// Registriamo i moduli corretti per il grafico a barre
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 const isJoined = ref(false);
 const tempName = ref('');
@@ -117,22 +129,24 @@ const username = ref('');
 const incidents = ref([]);
 const newTitle = ref('');
 const onlineUsers = ref([]);
-
 let socket = null;
 
-// -- LOGICA DEL GRAFICO REATTIVO --
+// -- KPI COMPUTED PROPERTIES --
+const totalIncidents = computed(() => incidents.value.length);
+const openIncidents = computed(() => incidents.value.filter(i => i.status === 'open').length);
+const resolvedIncidents = computed(() => incidents.value.filter(i => i.status === 'closed').length);
+
+// -- DATI PER IL GRAFICO A BARRE --
 const chartData = computed(() => {
-  const openCount = incidents.value.filter(i => i.status === 'open').length;
-  const closedCount = incidents.value.filter(i => i.status === 'closed').length;
-  
   return {
-    labels: ['Aperti', 'Risolti'],
+    labels: ['Open Tickets', 'Resolved Tickets'],
     datasets: [
       {
-        backgroundColor: ['#ef4444', '#10b981'], 
-        data: [openCount, closedCount],
-        borderWidth: 0,
-        hoverOffset: 4
+        label: 'Tickets',
+        backgroundColor: ['#E94560', '#10b981'], // Il magenta acceso e verde dell'immagine
+        data: [openIncidents.value, resolvedIncidents.value],
+        borderRadius: 4, // Arrotonda gli angoli delle barre
+        barThickness: 50 // Spessore delle barre
       }
     ]
   };
@@ -142,38 +156,41 @@ const chartOptions = ref({
   responsive: true,
   maintainAspectRatio: false,
   plugins: {
-    legend: {
-      position: 'bottom',
-      labels: { font: { family: 'sans-serif' } }
+    legend: { display: false } // Nascondiamo la legenda come nell'immagine
+  },
+  scales: {
+    y: {
+      beginAtZero: true,
+      grid: { color: 'rgba(255, 255, 255, 0.1)' },
+      ticks: { color: '#a1a1aa', stepSize: 1 }
+    },
+    x: {
+      grid: { display: false },
+      ticks: { color: '#ffffff' }
     }
   }
 });
 
+// -- LOGICA APPLICATIVA (invariata) --
 const joinBoard = async () => {
   if (!tempName.value.trim()) return;
   username.value = tempName.value.trim();
   isJoined.value = true;
 
-  // 1. RECUPERO STORICO: Carichiamo la "baseline" dal database
   try {
     const response = await fetch('/api/incidents');
-    const history = await response.json();
-    incidents.value = history; // Popola la lista e il grafico a torta
+    const data = await response.json();
+    incidents.value = data;
   } catch (err) {
-    console.error("Errore nel recupero dello storico:", err);
+    console.error("Errore:", err);
   }
 
-  // 2. SOTTOSCRIZIONE EVENTI: Ci colleghiamo al bus realtime
-  socket = io('/', { 
-    path: '/socket.io',
-    auth: { username: username.value } 
-  });
+  socket = io('/', { path: '/socket.io', auth: { username: username.value } });
 
   socket.on('incident_update', (change) => {
     if (change.operationType === 'insert') {
       incidents.value.unshift(change.fullDocument);
-    } 
-    else if (change.operationType === 'update') {
+    } else if (change.operationType === 'update') {
       const index = incidents.value.findIndex(inc => inc._id === change.documentKey._id);
       if (index !== -1 && change.fullDocument) {
         incidents.value[index] = change.fullDocument;
@@ -204,79 +221,171 @@ const resolveIncident = async (inc) => {
       body: JSON.stringify({ 
         status: 'closed',
         version: inc.version,
-        // AGGIUNTO: Inviamo al backend il nome di chi sta cliccando
-        closedBy: username.value 
+        closedBy: username.value
       })
     });
-
     if (response.status === 409) {
-      alert("⚠️ CONFLITTO! Qualcun altro ha già modificato questo incidente.");
+      alert("⚠️ CONFLITTO! Questo ticket è stato già modificato.");
     }
   } catch (err) {
-    console.error("Errore di rete:", err);
+    console.error("Errore:", err);
   }
 };
 </script>
 
 <style scoped>
-/* Tutto il CSS in un unico file per garanzia di build */
+/* =========================================================
+   TEMA DARK "DASHBOARD ENTERPRISE" (Ispirato all'immagine)
+   ========================================================= */
+
 * { box-sizing: border-box; }
-.app-container { min-height: 100vh; background-color: #f4f7f9; font-family: sans-serif; color: #333; padding: 2rem; display: flex; flex-direction: column; align-items: center; }
-.app-header { text-align: center; margin-bottom: 3rem; }
-.header-title { display: flex; align-items: center; justify-content: center; gap: 12px; }
-.pulse-indicator { width: 12px; height: 12px; background-color: #10b981; border-radius: 50%; box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); animation: pulse 2s infinite; }
-@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
-h1 { margin: 0; font-size: 2.5rem; color: #111827; letter-spacing: -0.5px; }
-.subtitle { color: #6b7280; font-size: 1rem; margin-top: 0.5rem; }
-.main-content { width: 100%; display: flex; flex-direction: column; gap: 2rem; }
-.card { background: white; border-radius: 12px; padding: 1.5rem 2rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #e5e7eb; }
-h2 { margin-top: 0; font-size: 1.25rem; color: #374151; border-bottom: 2px solid #f3f4f6; padding-bottom: 0.75rem; margin-bottom: 1.25rem; }
+
+.app-container { 
+  min-height: 100vh; 
+  background-color: #1A1A2E; /* Colore di sfondo scuro dell'immagine */
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+  color: #ffffff; 
+  padding: 2rem; 
+}
+
+.text-light { color: #ffffff; }
+.text-yellow { color: #FBBF24; } /* Il giallo per i numeri KPI */
+.text-magenta { color: #E94560; } /* Il rosa/magenta dell'immagine */
+
+/* -- Header -- */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 2rem;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding-bottom: 1rem;
+}
+.header-titles h1 {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 400;
+  letter-spacing: 1px;
+}
+.subtitle { color: #a1a1aa; font-size: 0.9rem; margin-top: 0.5rem; }
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(16, 185, 129, 0.1);
+  padding: 5px 12px;
+  border-radius: 20px;
+  color: #10b981;
+  font-size: 0.85rem;
+}
+
+.pulse-indicator { width: 10px; height: 10px; background-color: #10b981; border-radius: 50%; animation: pulse 2s infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
+
+/* -- Dashboard Layout Grid -- */
+.dashboard-wrapper { max-width: 1400px; margin: 0 auto; width: 100%; }
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr 1.5fr; /* 3 Colonne come nell'immagine */
+  gap: 1.5rem;
+  align-items: start;
+}
+
+/* -- Elementi Comuni (Cards) -- */
+.card { 
+  background-color: #22223B; /* Sfondo delle singole card */
+  border-radius: 8px; 
+  padding: 1.5rem; 
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3); 
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.card-title {
+  margin-top: 0;
+  font-size: 1rem;
+  color: #ffffff;
+  text-align: center;
+  margin-bottom: 1.5rem;
+  font-weight: 500;
+}
+
+/* -- Colonna 1: KPI Cards -- */
+.kpi-column { display: flex; flex-direction: column; gap: 1rem; }
+.kpi-card {
+  background-color: #22223B;
+  border-radius: 8px;
+  padding: 1.5rem 1rem;
+  text-align: center;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.kpi-card h3 { margin: 0 0 1rem 0; font-size: 0.9rem; color: #e2e8f0; font-weight: 400; }
+.kpi-number {
+  font-size: 2.5rem;
+  font-weight: bold;
+  background-color: rgba(251, 191, 36, 0.1);
+  display: inline-block;
+  padding: 0.5rem 1.5rem;
+  border-radius: 50px;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+/* -- Colonna 2: Grafico e Creazione -- */
+.center-column { display: flex; flex-direction: column; gap: 1.5rem; }
+.chart-container { position: relative; height: 300px; width: 100%; }
+
 .input-group { display: flex; gap: 1rem; }
-.modern-input { flex: 1; padding: 0.75rem 1rem; font-size: 1rem; border: 1px solid #d1d5db; border-radius: 8px; outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
-.modern-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
-.modern-btn { display: flex; align-items: center; background-color: #3b82f6; color: white; border: none; padding: 0 1.5rem; font-size: 1rem; font-weight: 600; border-radius: 8px; cursor: pointer; transition: background-color 0.2s; }
-.modern-btn:hover:not(:disabled) { background-color: #2563eb; }
-.modern-btn:disabled { background-color: #9ca3af; cursor: not-allowed; }
-.card-header { display: flex; justify-content: space-between; align-items: baseline; }
+.dark-input {
+  flex: 1; padding: 0.75rem 1rem; font-size: 1rem; 
+  background-color: #1A1A2E; color: white;
+  border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; outline: none;
+}
+.dark-input:focus { border-color: #E94560; }
+.magenta-btn {
+  background-color: #E94560; color: white; border: none; padding: 0 1.5rem; 
+  font-weight: 600; border-radius: 4px; cursor: pointer; transition: 0.2s;
+}
+.magenta-btn:hover:not(:disabled) { background-color: #d13d56; }
+.magenta-btn:disabled { background-color: #4b5563; cursor: not-allowed; }
+
+/* -- Colonna 3: Lista Incidenti -- */
+.scrollable-list {
+  max-height: 500px;
+  overflow-y: auto;
+  padding-right: 5px;
+}
+/* Scrollbar per la lista */
+.scrollable-list::-webkit-scrollbar { width: 6px; }
+.scrollable-list::-webkit-scrollbar-track { background: #1A1A2E; }
+.scrollable-list::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
+
 .incident-list { list-style: none; padding: 0; margin: 0; }
-.incident-item { display: flex; justify-content: space-between; align-items: center; padding: 1rem; background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 0.75rem; }
+.incident-item {
+  display: flex; justify-content: space-between; align-items: center; 
+  padding: 1rem; background-color: #1A1A2E; border: 1px solid rgba(255,255,255,0.1); 
+  border-radius: 4px; margin-bottom: 0.75rem;
+}
 .incident-info { display: flex; flex-direction: column; gap: 0.25rem; }
-.incident-title { font-weight: 600; color: #1f2937; font-size: 1.1rem; transition: color 0.3s; }
-.resolved-text { color: #9ca3af; text-decoration: line-through; }
-.badge { padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 700; }
-.badge.counter { background-color: #e0e7ff; color: #4f46e5; }
-.badge.open { background-color: #fee2e2; color: #dc2626; }
-.badge.closed { background-color: #d1fae5; color: #059669; }
-.empty-state { display: flex; flex-direction: column; align-items: center; padding: 3rem 0; color: #6b7280; }
-.spinner { width: 30px; height: 30px; border: 3px solid #f3f4f6; border-top: 3px solid #3b82f6; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 1rem; }
-@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+.incident-title { font-weight: 600; color: #ffffff; font-size: 1rem; }
+.resolved-text { color: #6b7280; text-decoration: line-through; }
+.incident-author { font-size: 0.8rem; color: #9ca3af; }
+
+.incident-status-group { display: flex; align-items: center; gap: 0.75rem; }
+.resolve-btn {
+  background-color: #E94560; color: white; border: none; border-radius: 50%; 
+  width: 24px; height: 24px; cursor: pointer; font-weight: bold;
+}
+.resolve-btn:hover { background-color: #d13d56; transform: scale(1.1); }
+
+.badge { padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
+.badge.open { background-color: rgba(233, 69, 96, 0.2); color: #E94560; border: 1px solid #E94560; }
+.badge.closed { background-color: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; }
+
+.empty-state { display: flex; flex-direction: column; align-items: center; padding: 2rem 0; color: #6b7280; }
 .list-enter-active, .list-leave-active { transition: all 0.5s ease; }
 .list-enter-from { opacity: 0; transform: translateX(-30px); }
 .list-leave-to { opacity: 0; transform: translateX(30px); }
-.login-wrapper { display: flex; align-items: center; justify-content: center; height: 80vh; width: 100%; }
-.login-card { width: 100%; max-width: 450px; text-align: center; padding: 3rem 2rem; }
-.dashboard-layout { display: grid; grid-template-columns: 280px 1fr; gap: 2rem; width: 100%; max-width: 1200px; }
-.sidebar { align-self: start; position: sticky; top: 2rem; }
-.sidebar-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f3f4f6; padding-bottom: 0.75rem; margin-bottom: 1rem; }
-.sidebar-header h3 { margin: 0; font-size: 1.1rem; color: #374151; }
-.users-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-.users-list li { display: flex; align-items: center; padding: 0.5rem; border-radius: 6px; background-color: #f9fafb; }
-.current-user { background-color: #eff6ff !important; border: 1px solid #bfdbfe; }
-.avatar { width: 32px; height: 32px; border-radius: 50%; background-color: #3b82f6; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 10px; }
-.user-name { font-weight: 500; font-size: 0.95rem; color: #1f2937; flex: 1; overflow: hidden; text-overflow: ellipsis; }
-.you-badge { background: #3b82f6; color: white; font-size: 0.65rem; padding: 2px 6px; border-radius: 12px; font-weight: bold; }
-.incident-author { font-size: 0.85rem; color: #6b7280; margin-top: 4px; }
-.incident-status-group { display: flex; align-items: center; gap: 0.75rem; }
-.resolve-btn { background-color: #10b981; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.2s, background-color 0.2s; box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2); }
-.resolve-btn:hover { background-color: #059669; transform: scale(1.1); }
-.resolve-btn:active { transform: scale(0.95); }
 
-/* --- CORREZIONE DEL CONTENITORE DEL GRAFICO --- */
-.chart-container { 
-  position: relative; 
-  height: 220px; 
-  width: 100%; 
-  /* Ho rimosso il display: flex che schiacciava il canvas */
-}
-.empty-chart { text-align: center; color: #9ca3af; font-size: 0.9rem; padding: 2rem 0; font-style: italic; }
+/* Schermata Login */
+.login-wrapper { display: flex; align-items: center; justify-content: center; height: 80vh; width: 100%; }
+.login-card { width: 100%; max-width: 450px; text-align: center; }
 </style>
