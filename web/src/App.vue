@@ -1,6 +1,5 @@
 <template>
   <div class="app-container">
-    <!-- Schermata di Login (Dark Mode) -->
     <div v-if="!isJoined" class="login-wrapper">
       <div class="card login-card">
         <div class="pulse-indicator" style="margin: 0 auto 1rem auto; width: 40px; height: 40px;"></div>
@@ -14,7 +13,6 @@
       </div>
     </div>
 
-    <!-- Dashboard Layout (Ispirato all'immagine fornita) -->
     <div v-else class="dashboard-wrapper">
       <header class="app-header">
         <div class="header-titles">
@@ -29,7 +27,6 @@
 
       <main class="dashboard-grid">
         
-        <!-- COLONNA 1: KPI Cards -->
         <div class="grid-col kpi-column">
           <div class="kpi-card">
             <h3>Total Number of Tickets</h3>
@@ -37,13 +34,18 @@
           </div>
           
           <div class="kpi-card">
-            <h3>Total Number of Open Tickets</h3>
-            <div class="kpi-number text-yellow">{{ openIncidents }}</div>
+            <h3>Open Tickets</h3>
+            <div class="kpi-number text-magenta">{{ openIncidents }}</div>
           </div>
 
           <div class="kpi-card">
-            <h3>Total Number of Resolved Tickets</h3>
-            <div class="kpi-number text-yellow">{{ resolvedIncidents }}</div>
+            <h3>Escalated Tickets</h3>
+            <div class="kpi-number text-orange">{{ escalatedIncidents }}</div>
+          </div>
+
+          <div class="kpi-card">
+            <h3>Resolved Tickets</h3>
+            <div class="kpi-number text-green">{{ resolvedIncidents }}</div>
           </div>
 
           <div class="kpi-card">
@@ -52,12 +54,10 @@
           </div>
         </div>
 
-        <!-- COLONNA 2: Grafico a Barre e Input -->
         <div class="grid-col center-column">
           <div class="card chart-card">
             <h3 class="card-title">Incidents Status Overview</h3>
             <div class="chart-container">
-               <!-- Passiamo al BarChart -->
               <BarChart v-if="totalIncidents > 0" :data="chartData" :options="chartOptions" />
               <div v-else class="empty-state">No data available</div>
             </div>
@@ -72,7 +72,6 @@
           </div>
         </div>
 
-        <!-- COLONNA 3: Feed Realtime (Lista) -->
         <div class="grid-col right-column">
           <div class="card list-card">
             <div class="card-header">
@@ -90,16 +89,25 @@
                     <span class="incident-title" :class="{ 'resolved-text': inc.status === 'closed' }">{{ inc.title }}</span>
                     <span class="incident-author">Reported by: <strong>{{ inc.createdBy || 'Anonimo' }}</strong></span>
                     
-                    <span v-if="inc.status === 'closed' && inc.closedBy" class="incident-author text-magenta">
+                    <span v-if="inc.status === 'closed' && inc.closedBy" class="incident-author text-green">
                       ✓ Resolved by: <strong>{{ inc.closedBy }}</strong>
+                    </span>
+                    <span v-if="inc.lockedBy" class="incident-author text-orange">
+                      🔒 Locked by: <strong>{{ inc.lockedBy }}</strong>
                     </span>
                   </div>
                   
                   <div class="incident-status-group">
                     <span :class="['badge', inc.status]">{{ inc.status.toUpperCase() }}</span>
-                    <button v-if="inc.status === 'open'" @click="resolveIncident(inc)" class="resolve-btn" title="Resolve">
-                      ✓
-                    </button>
+                    
+                    <template v-if="(inc.status === 'open' || inc.status === 'escalated')">
+                      <button v-if="!inc.lockedBy" @click="claimIncident(inc)" class="claim-btn" title="Prendi in carico">
+                        🔒
+                      </button>
+                      <button v-if="inc.lockedBy === username" @click="resolveIncident(inc)" class="resolve-btn" title="Risolvi">
+                        ✓
+                      </button>
+                    </template>
                   </div>
                 </li>
               </TransitionGroup>
@@ -116,11 +124,9 @@
 import { ref, computed } from 'vue';
 import { io } from 'socket.io-client';
 
-// -- IMPORT PER IL GRAFICO A BARRE (invece della torta) --
 import { Chart as ChartJS, Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
 import { Bar as BarChart } from 'vue-chartjs';
 
-// Registriamo i moduli corretti per il grafico a barre
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 const isJoined = ref(false);
@@ -134,19 +140,20 @@ let socket = null;
 // -- KPI COMPUTED PROPERTIES --
 const totalIncidents = computed(() => incidents.value.length);
 const openIncidents = computed(() => incidents.value.filter(i => i.status === 'open').length);
+const escalatedIncidents = computed(() => incidents.value.filter(i => i.status === 'escalated').length);
 const resolvedIncidents = computed(() => incidents.value.filter(i => i.status === 'closed').length);
 
-// -- DATI PER IL GRAFICO A BARRE --
+// -- DATI PER IL GRAFICO A BARRE (Aggiornato con Escalated) --
 const chartData = computed(() => {
   return {
-    labels: ['Open Tickets', 'Resolved Tickets'],
+    labels: ['Open', 'Escalated', 'Resolved'],
     datasets: [
       {
         label: 'Tickets',
-        backgroundColor: ['#E94560', '#10b981'], // Il magenta acceso e verde dell'immagine
-        data: [openIncidents.value, resolvedIncidents.value],
-        borderRadius: 4, // Arrotonda gli angoli delle barre
-        barThickness: 50 // Spessore delle barre
+        backgroundColor: ['#E94560', '#f59e0b', '#10b981'], 
+        data: [openIncidents.value, escalatedIncidents.value, resolvedIncidents.value],
+        borderRadius: 4, 
+        barThickness: 40 
       }
     ]
   };
@@ -155,9 +162,7 @@ const chartData = computed(() => {
 const chartOptions = ref({
   responsive: true,
   maintainAspectRatio: false,
-  plugins: {
-    legend: { display: false } // Nascondiamo la legenda come nell'immagine
-  },
+  plugins: { legend: { display: false } },
   scales: {
     y: {
       beginAtZero: true,
@@ -171,21 +176,21 @@ const chartOptions = ref({
   }
 });
 
-// -- LOGICA APPLICATIVA (invariata) --
 const joinBoard = async () => {
   if (!tempName.value.trim()) return;
   username.value = tempName.value.trim();
   isJoined.value = true;
 
-  try {
-    const response = await fetch('/api/incidents');
-    const data = await response.json();
-    incidents.value = data;
-  } catch (err) {
-    console.error("Errore:", err);
-  }
-
   socket = io('/', { path: '/socket.io', auth: { username: username.value } });
+  
+  socket.on('connect', async () => {
+    try {
+      const response = await fetch('/api/incidents');
+      incidents.value = await response.json();
+    } catch (err) {
+      console.error("Errore durante la sincronizzazione:", err);
+    }
+  });
 
   socket.on('incident_update', (change) => {
     if (change.operationType === 'insert') {
@@ -193,9 +198,22 @@ const joinBoard = async () => {
     } else if (change.operationType === 'update') {
       const index = incidents.value.findIndex(inc => inc._id === change.documentKey._id);
       if (index !== -1 && change.fullDocument) {
-        incidents.value[index] = change.fullDocument;
+        // Manteniamo l'info del lock locale se presente
+        const currentLock = incidents.value[index].lockedBy;
+        incidents.value[index] = { ...change.fullDocument, lockedBy: currentLock };
       }
     }
+  });
+
+  // Gestione Lock via WebSocket
+  socket.on('incident_locked', ({ id, lockedBy }) => {
+    const inc = incidents.value.find(i => i._id === id);
+    if (inc) inc.lockedBy = lockedBy;
+  });
+
+  socket.on('incident_unlocked', ({ id }) => {
+    const inc = incidents.value.find(i => i._id === id);
+    if (inc) delete inc.lockedBy;
   });
 
   socket.on('users_update', (users) => {
@@ -213,6 +231,22 @@ const createIncident = async () => {
   newTitle.value = '';
 };
 
+const claimIncident = async (inc) => {
+  try {
+    const response = await fetch(`/api/incidents/${inc._id}/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username.value })
+    });
+    if (!response.ok) {
+      const data = await response.json();
+      alert(`Impossibile prendere in carico: ${data.message}`);
+    }
+  } catch (err) {
+    console.error("Errore claim:", err);
+  }
+};
+
 const resolveIncident = async (inc) => {
   try {
     const response = await fetch(`/api/incidents/${inc._id}`, {
@@ -228,115 +262,69 @@ const resolveIncident = async (inc) => {
       alert("⚠️ CONFLITTO! Questo ticket è stato già modificato.");
     }
   } catch (err) {
-    console.error("Errore:", err);
+    console.error("Errore resolve:", err);
   }
 };
 </script>
 
 <style scoped>
-/* =========================================================
-   TEMA DARK "DASHBOARD ENTERPRISE" (Ispirato all'immagine)
-   ========================================================= */
-
 * { box-sizing: border-box; }
 
 .app-container { 
   min-height: 100vh; 
-  background-color: #1A1A2E; /* Colore di sfondo scuro dell'immagine */
+  background-color: #1A1A2E; 
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
   color: #ffffff; 
   padding: 2rem; 
 }
 
 .text-light { color: #ffffff; }
-.text-yellow { color: #FBBF24; } /* Il giallo per i numeri KPI */
-.text-magenta { color: #E94560; } /* Il rosa/magenta dell'immagine */
+.text-yellow { color: #FBBF24; } 
+.text-magenta { color: #E94560; } 
+.text-orange { color: #f59e0b; }
+.text-green { color: #10b981; }
 
-/* -- Header -- */
 .app-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 2rem;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
-  padding-bottom: 1rem;
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 2rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 1rem;
 }
-.header-titles h1 {
-  margin: 0;
-  font-size: 2rem;
-  font-weight: 400;
-  letter-spacing: 1px;
-}
+.header-titles h1 { margin: 0; font-size: 2rem; font-weight: 400; }
 .subtitle { color: #a1a1aa; font-size: 0.9rem; margin-top: 0.5rem; }
 
 .header-status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: rgba(16, 185, 129, 0.1);
-  padding: 5px 12px;
-  border-radius: 20px;
-  color: #10b981;
-  font-size: 0.85rem;
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(16, 185, 129, 0.1); padding: 5px 12px; border-radius: 20px;
+  color: #10b981; font-size: 0.85rem;
 }
 
 .pulse-indicator { width: 10px; height: 10px; background-color: #10b981; border-radius: 50%; animation: pulse 2s infinite; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
 
-/* -- Dashboard Layout Grid -- */
 .dashboard-wrapper { max-width: 1400px; margin: 0 auto; width: 100%; }
 .dashboard-grid {
-  display: grid;
-  grid-template-columns: 1fr 2fr 1.5fr; /* 3 Colonne come nell'immagine */
-  gap: 1.5rem;
-  align-items: start;
+  display: grid; grid-template-columns: 1fr 2fr 1.5fr; gap: 1.5rem; align-items: start;
 }
 
-/* -- Elementi Comuni (Cards) -- */
 .card { 
-  background-color: #22223B; /* Sfondo delle singole card */
-  border-radius: 8px; 
-  padding: 1.5rem; 
-  box-shadow: 0 4px 6px rgba(0,0,0,0.3); 
-  border: 1px solid rgba(255,255,255,0.05);
+  background-color: #22223B; border-radius: 8px; padding: 1.5rem; 
+  box-shadow: 0 4px 6px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05);
 }
-.card-title {
-  margin-top: 0;
-  font-size: 1rem;
-  color: #ffffff;
-  text-align: center;
-  margin-bottom: 1.5rem;
-  font-weight: 500;
-}
+.card-title { margin-top: 0; font-size: 1rem; color: #ffffff; text-align: center; margin-bottom: 1.5rem; font-weight: 500; }
 
-/* -- Colonna 1: KPI Cards -- */
 .kpi-column { display: flex; flex-direction: column; gap: 1rem; }
-.kpi-card {
-  background-color: #22223B;
-  border-radius: 8px;
-  padding: 1.5rem 1rem;
-  text-align: center;
-  border: 1px solid rgba(255,255,255,0.05);
-}
-.kpi-card h3 { margin: 0 0 1rem 0; font-size: 0.9rem; color: #e2e8f0; font-weight: 400; }
+.kpi-card { background-color: #22223B; border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid rgba(255,255,255,0.05); }
+.kpi-card h3 { margin: 0 0 0.5rem 0; font-size: 0.85rem; color: #e2e8f0; font-weight: 400; }
 .kpi-number {
-  font-size: 2.5rem;
-  font-weight: bold;
-  background-color: rgba(251, 191, 36, 0.1);
-  display: inline-block;
-  padding: 0.5rem 1.5rem;
-  border-radius: 50px;
-  border: 1px solid rgba(251, 191, 36, 0.3);
+  font-size: 2rem; font-weight: bold; background-color: rgba(255, 255, 255, 0.05);
+  display: inline-block; padding: 0.2rem 1.5rem; border-radius: 50px;
 }
 
-/* -- Colonna 2: Grafico e Creazione -- */
 .center-column { display: flex; flex-direction: column; gap: 1.5rem; }
 .chart-container { position: relative; height: 300px; width: 100%; }
 
 .input-group { display: flex; gap: 1rem; }
 .dark-input {
-  flex: 1; padding: 0.75rem 1rem; font-size: 1rem; 
-  background-color: #1A1A2E; color: white;
+  flex: 1; padding: 0.75rem 1rem; font-size: 1rem; background-color: #1A1A2E; color: white;
   border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; outline: none;
 }
 .dark-input:focus { border-color: #E94560; }
@@ -347,13 +335,7 @@ const resolveIncident = async (inc) => {
 .magenta-btn:hover:not(:disabled) { background-color: #d13d56; }
 .magenta-btn:disabled { background-color: #4b5563; cursor: not-allowed; }
 
-/* -- Colonna 3: Lista Incidenti -- */
-.scrollable-list {
-  max-height: 500px;
-  overflow-y: auto;
-  padding-right: 5px;
-}
-/* Scrollbar per la lista */
+.scrollable-list { max-height: 500px; overflow-y: auto; padding-right: 5px; }
 .scrollable-list::-webkit-scrollbar { width: 6px; }
 .scrollable-list::-webkit-scrollbar-track { background: #1A1A2E; }
 .scrollable-list::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 10px; }
@@ -370,22 +352,25 @@ const resolveIncident = async (inc) => {
 .incident-author { font-size: 0.8rem; color: #9ca3af; }
 
 .incident-status-group { display: flex; align-items: center; gap: 0.75rem; }
-.resolve-btn {
-  background-color: #E94560; color: white; border: none; border-radius: 50%; 
-  width: 24px; height: 24px; cursor: pointer; font-weight: bold;
+.resolve-btn, .claim-btn {
+  color: white; border: none; border-radius: 50%; width: 28px; height: 28px; 
+  cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center;
 }
-.resolve-btn:hover { background-color: #d13d56; transform: scale(1.1); }
+.resolve-btn { background-color: #10b981; }
+.resolve-btn:hover { background-color: #0d9488; transform: scale(1.1); }
+.claim-btn { background-color: #f59e0b; font-size: 0.8rem; }
+.claim-btn:hover { background-color: #d97706; transform: scale(1.1); }
 
 .badge { padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
 .badge.open { background-color: rgba(233, 69, 96, 0.2); color: #E94560; border: 1px solid #E94560; }
 .badge.closed { background-color: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; }
+.badge.escalated { background-color: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; }
 
 .empty-state { display: flex; flex-direction: column; align-items: center; padding: 2rem 0; color: #6b7280; }
 .list-enter-active, .list-leave-active { transition: all 0.5s ease; }
 .list-enter-from { opacity: 0; transform: translateX(-30px); }
 .list-leave-to { opacity: 0; transform: translateX(30px); }
 
-/* Schermata Login */
 .login-wrapper { display: flex; align-items: center; justify-content: center; height: 80vh; width: 100%; }
 .login-card { width: 100%; max-width: 450px; text-align: center; }
 </style>

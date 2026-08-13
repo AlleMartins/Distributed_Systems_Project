@@ -1,3 +1,35 @@
+# =========================================================================
+# mongo.yaml - MongoDB come vero Replica Set a 3 nodi
+#
+# Rispetto alla versione precedente (Deployment con 1 solo membro), qui:
+#  - Mongo diventa uno StatefulSet: ogni pod ha identità di rete stabile
+#    (mongo-0, mongo-1, mongo-2) necessaria per un replica set reale.
+#  - Il replica set ha 3 membri -> tollera la perdita di 1 nodo mantenendo
+#    un primary eletto automaticamente (dimostra failover reale).
+#  - Ogni pod ha il proprio PersistentVolumeClaim: i dati sopravvivono al
+#    riavvio/ricreazione del pod (prima erano su storage effimero).
+#  - L'inizializzazione del replica set avviene UNA sola volta tramite un
+#    Job dedicato (prima veniva ritentata da un sidecar per ogni pod).
+# =========================================================================
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  namespace: app
+  labels:
+    app: mongo
+spec:
+  # Headless service: necessario per lo StatefulSet, fornisce i DNS
+  # stabili mongo-0.mongo, mongo-1.mongo, mongo-2.mongo (nel namespace app)
+  clusterIP: None
+  selector:
+    app: mongo
+  ports:
+  - port: 27017
+    targetPort: 27017
+    name: mongodb
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -5,15 +37,23 @@ metadata:
   namespace: app
 data:
   init.js: |
-    rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]})
+    rs.initiate({
+      _id: "rs0",
+      members: [
+        { _id: 0, host: "mongo-0.mongo.app.svc.cluster.local:27017" },
+        { _id: 1, host: "mongo-1.mongo.app.svc.cluster.local:27017" },
+        { _id: 2, host: "mongo-2.mongo.app.svc.cluster.local:27017" }
+      ]
+    })
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: mongo
   namespace: app
 spec:
-  replicas: 1
+  serviceName: mongo          # deve corrispondere al nome della headless service
+  replicas: 3
   selector:
     matchLabels:
       app: mongo
@@ -22,24 +62,97 @@ spec:
       labels:
         app: mongo
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
       - name: mongo
         image: mongo:6
         args: ["--replSet", "rs0", "--bind_ip_all"]
         ports:
         - containerPort: 27017
+          name: mongodb
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        volumeMounts:
+        - name: mongo-data
+          mountPath: /data/db
+        # Probe "profonde": verificano che mongod risponda realmente
+        # (ping sul database), non solo che il processo sia in vita.
+        livenessProbe:
+          exec:
+            command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+          initialDelaySeconds: 20
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+  # Ogni pod (mongo-0, mongo-1, mongo-2) ottiene il proprio volume
+  # persistente indipendente: perdere un pod non significa perdere i dati.
+  volumeClaimTemplates:
+  - metadata:
+      name: mongo-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi
+---
+# Job "one-shot": inizializza il replica set una sola volta, quando tutti
+# e 3 i membri sono raggiungibili. Se il replica set risulta già
+# inizializzato (es. dopo un riavvio del Job per un motivo qualsiasi),
+# non fa nulla ed esce con successo.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongo-rs-init
+  namespace: app
+spec:
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
       - name: init
         image: mongo:6
-        command: 
-          - "bash"
-          - "-c"
+        command:
+          - bash
+          - -c
           - |
-            echo "In attesa di MongoDB..."
-            until mongosh --host mongo:27017 --eval 'print("up")'; do sleep 2; done
-            echo "Inizializzazione Replica Set..."
-            mongosh --host mongo:27017 /init/init.js || true
-            echo "Inizializzazione completata. Mantenimento del sidecar in vita."
-            sleep infinity
+            set -e
+            echo "In attesa che tutti i membri del replica set siano raggiungibili..."
+            for host in mongo-0.mongo mongo-1.mongo mongo-2.mongo; do
+              until mongosh --host "$host" --port 27017 --quiet --eval 'db.adminCommand("ping")' > /dev/null 2>&1; do
+                echo "  ...$host non ancora pronto, riprovo tra 2s"
+                sleep 2
+              done
+              echo "  $host OK"
+            done
+
+            echo "Verifico se il replica set e' gia' inizializzato..."
+            STATUS=$(mongosh --host mongo-0.mongo --port 27017 --quiet --eval 'try { rs.status().ok } catch(e) { print(0) }' || echo 0)
+            if [ "$STATUS" = "1" ]; then
+              echo "Replica set gia' inizializzato, nulla da fare."
+              exit 0
+            fi
+
+            echo "Inizializzo il replica set rs0 con 3 membri..."
+            mongosh --host mongo-0.mongo --port 27017 /init/init.js
+
+            echo "Attendo l'elezione del primary..."
+            until mongosh --host mongo-0.mongo --port 27017 --quiet --eval 'rs.isMaster().ismaster || rs.isMaster().secondary' 2>/dev/null | grep -q true; do
+              sleep 2
+            done
+            echo "Replica set pronto (primary eletto)."
         volumeMounts:
         - name: init
           mountPath: /init
@@ -48,14 +161,16 @@ spec:
         configMap:
           name: mongo-init
 ---
-apiVersion: v1
-kind: Service
+# Garantisce che, durante drain/manutenzione volontaria dei nodi Minikube,
+# non vengano abbattuti più membri del replica set contemporaneamente
+# (con 3 membri, perdere 2 nodi insieme farebbe perdere il quorum).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
 metadata:
-  name: mongo
+  name: mongo-pdb
   namespace: app
 spec:
+  minAvailable: 2
   selector:
-    app: mongo
-  ports:
-  - port: 27017
-    targetPort: 27017
+    matchLabels:
+      app: mongo
