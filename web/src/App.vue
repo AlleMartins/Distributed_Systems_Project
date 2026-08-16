@@ -104,9 +104,14 @@
                       <button v-if="!inc.lockedBy" @click="claimIncident(inc)" class="claim-btn" title="Prendi in carico">
                         🔒
                       </button>
-                      <button v-if="inc.lockedBy === username" @click="resolveIncident(inc)" class="resolve-btn" title="Risolvi">
-                        ✓
-                      </button>
+                      <template v-if="inc.lockedBy === username">
+                        <button @click="resolveIncident(inc)" class="resolve-btn" title="Risolvi">
+                          ✓
+                        </button>
+                        <button @click="releaseClaim(inc)" class="release-btn" title="Rilascia (non risolvo io)">
+                          ✕
+                        </button>
+                      </template>
                     </template>
                   </div>
                 </li>
@@ -239,11 +244,52 @@ const claimIncident = async (inc) => {
       body: JSON.stringify({ username: username.value })
     });
     if (!response.ok) {
-      const data = await response.json();
-      alert(`Impossibile prendere in carico: ${data.message}`);
+      let message = `HTTP ${response.status}`;
+      try {
+        const data = await response.json();
+        message = data.message || data.error || message;
+      } catch {
+        // corpo non-JSON: teniamo il messaggio generico con lo status code
+      }
+      alert(`Impossibile prendere in carico: ${message}`);
     }
   } catch (err) {
     console.error("Errore claim:", err);
+    alert('Errore di rete durante la presa in carico (vedi console per i dettagli).');
+  }
+};
+
+// Rilascio esplicito: prima l'unico modo per liberare un incidente preso
+// in carico per errore era aspettare i 60s di TTL del lock. Non aggiorniamo
+// incidents.value qui direttamente: lasciamo che sia l'evento socket
+// 'incident_unlocked' (già gestito sopra, broadcast a tutti i client
+// tramite l'adapter Redis) a farlo, per restare coerenti col resto del
+// flusso realtime invece di introdurre un aggiornamento ottimistico che
+// potrebbe disallinearsi se la richiesta fallisce silenziosamente.
+const releaseClaim = async (inc) => {
+  try {
+    const response = await fetch(`/api/incidents/${inc._id}/claim`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username.value })
+    });
+    if (!response.ok) {
+      // se il server risponde con una pagina di errore (es. 404/502 dall'Ingress
+      // perché la route non è ancora deployata, o un errore non gestito),
+      // response.json() lancerebbe un'eccezione che finirebbe silenziosa
+      // nel catch sottostante, e l'utente non vedrebbe mai un messaggio.
+      let message = `HTTP ${response.status}`;
+      try {
+        const data = await response.json();
+        message = data.error || message;
+      } catch {
+        // corpo non-JSON: teniamo il messaggio generico con lo status code
+      }
+      alert(`Impossibile rilasciare: ${message}`);
+    }
+  } catch (err) {
+    console.error("Errore release:", err);
+    alert('Errore di rete durante il rilascio (vedi console per i dettagli).');
   }
 };
 
@@ -352,7 +398,7 @@ const resolveIncident = async (inc) => {
 .incident-author { font-size: 0.8rem; color: #9ca3af; }
 
 .incident-status-group { display: flex; align-items: center; gap: 0.75rem; }
-.resolve-btn, .claim-btn {
+.resolve-btn, .claim-btn, .release-btn {
   color: white; border: none; border-radius: 50%; width: 28px; height: 28px; 
   cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center;
 }
@@ -360,6 +406,8 @@ const resolveIncident = async (inc) => {
 .resolve-btn:hover { background-color: #0d9488; transform: scale(1.1); }
 .claim-btn { background-color: #f59e0b; font-size: 0.8rem; }
 .claim-btn:hover { background-color: #d97706; transform: scale(1.1); }
+.release-btn { background-color: #6b7280; font-size: 0.8rem; }
+.release-btn:hover { background-color: #4b5563; transform: scale(1.1); }
 
 .badge { padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
 .badge.open { background-color: rgba(233, 69, 96, 0.2); color: #E94560; border: 1px solid #E94560; }
