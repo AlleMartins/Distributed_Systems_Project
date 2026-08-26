@@ -5,14 +5,14 @@ const { createClient } = require('redis');
 const { createAdapter } = require('@socket.io/redis-adapter');
 const { MongoClient, ObjectId } = require('mongodb'); 
 const cors = require('cors');
-const os = require('os'); //Necessario per recuperare l'ID del pod
+const os = require('os'); // AGGIUNTO: Necessario per recuperare l'ID del pod
 
 const port = process.env.PORT || 3000;
 const mongoUrl = process.env.MONGO_URL || 'mongodb://localhost:27017/app?replicaSet=rs0';
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-const podId = os.hostname(); // Identificativo univoco del container (es. api-7685fc6bd-4wv68)
+const podId = os.hostname(); // AGGIUNTO: Identificativo univoco del container (es. api-7685fc6bd-4wv68)
 
-// Script Lua per il rinnovo atomico del lock di leadership.
+// Script Lua per il rinnovo ATOMICO del lock di leadership.
 // GET+PEXPIRE separati non sono atomici: nella finestra tra i due comandi
 // il lock potrebbe scadere ed essere acquisito da un altro pod, e la
 // PEXPIRE successiva estenderebbe il TTL della SUA chiave, non della
@@ -28,7 +28,7 @@ const RENEW_LOCK_SCRIPT = `
   end
 `;
 
-// Script Lua per il rilascio atomico del lock sul claim di un incidente.
+// Script Lua per il rilascio ATOMICO del lock sul claim di un incidente.
 // Stesso principio del rinnovo: un DEL incondizionato cancellerebbe
 // qualsiasi lock trovi sulla chiave, anche se nel frattempo è scaduto
 // e un altro analista lo ha già preso (gli cancelleremmo il lock per
@@ -89,7 +89,7 @@ async function startServer() {
       }
     });
 
-    // --- DISTRIBUTED LOCK / CLAIM (MUTUA ESCLUSIONE) ---
+    // --- A) DISTRIBUTED LOCK / CLAIM (MUTUA ESCLUSIONE) ---
     // Permette a un operatore di "bloccare" l'incidente per 60 secondi
     apiRouter.post('/incidents/:id/claim', async (req, res) => {
       try {
@@ -113,12 +113,14 @@ async function startServer() {
       }
     });
 
-    // --- RILASCIO ESPLICITO DEL CLAIM ---
+    // --- A.1) RILASCIO ESPLICITO DEL CLAIM ---
     // Senza questa rotta, l'unico modo per liberare un incidente preso in
     // carico per errore (o se l'analista si allontana senza risolverlo)
     // era aspettare i 60s di TTL del lock. Con questa rotta il rilascio è
     // immediato. Riusa lo stesso RELEASE_LOCK_SCRIPT della PATCH: cancella
-    // il lock solo se appartiene ancora a chi lo sta rilasciando.
+    // il lock solo se appartiene ancora a chi lo sta rilasciando, così un
+    // analista non può liberare per errore (o per dispetto) il lock preso
+    // nel frattempo da un collega.
     apiRouter.delete('/incidents/:id/claim', async (req, res) => {
       try {
         const { id } = req.params;
@@ -148,7 +150,7 @@ async function startServer() {
       }
     });
 
-    // --- rotta patch con risoluzione con optimistic locking + rilascio mutex ---
+    // --- ROTTA PATCH (Risoluzione con Optimistic Locking + Rilascio Mutex) ---
     apiRouter.patch('/incidents/:id', async (req, res) => {
       try {
         const { id } = req.params;
@@ -159,7 +161,7 @@ async function startServer() {
         // (imposto nascondendo il bottone in UI), quindi un client bug/
         // malevolo poteva chiamare direttamente questa PATCH bypassando
         // completamente la mutua esclusione. Ora, se l'incidente risulta
-        // bloccato da altro rispetto a chi sta chiudendo, blocchiamo
+        // bloccato da QUALCUN ALTRO rispetto a chi sta chiudendo, blocchiamo
         // la richiesta qui, indipendentemente da cosa mostra il frontend.
         const currentOwner = await pubClient.get(lockKey);
         if (currentOwner && currentOwner !== closedBy) {
@@ -188,10 +190,13 @@ async function startServer() {
           return res.status(409).json({ error: 'Conflitto! Il documento è stato già modificato o non esiste.' });
         }
 
-        // Rilascio atomico del lock: cancello la chiave solo se
+        // Rilascio ATOMICO del lock: cancelliamo la chiave solo se
         // appartiene ancora a chi ha appena chiuso l'incidente. Un DEL
         // incondizionato cancellerebbe qualunque lock trovi sulla chiave
-        // in quel momento.
+        // in quel momento — se closedBy avesse mandato una richiesta in
+        // ritardo dopo che il proprio lock era già scaduto e un altro
+        // analista ne avesse preso uno nuovo, avremmo cancellato IL SUO
+        // lock, non il nostro.
         if (closedBy) {
           await pubClient.eval(RELEASE_LOCK_SCRIPT, {
             keys: [lockKey],
@@ -229,20 +234,34 @@ async function startServer() {
     });
 
     // --- SOCKET.IO CONNESSIONI ---
+    // NOTA: prima qui mantenevamo manualmente un Hash su Redis
+    // (active_users) aggiornato via hSet/hDel. Il problema: se un pod
+    // viene terminato in modo non pulito (rollout restart, crash, OOM),
+    // il 'disconnect' non scatta mai lato server per quei socket, e le
+    // loro entry restano per sempre nell'hash — contatore "utenti online"
+    // che cresce all'infinito ad ogni riavvio non pulito.
+    // Fix: usiamo io.fetchSockets(), che interroga in tempo reale (via
+    // adapter Redis) TUTTI i pod per sapere chi è REALMENTE connesso in
+    // questo momento. Nessuno stato duplicato da mantenere sincronizzato:
+    // Socket.IO rileva le connessioni morte tramite il proprio protocollo
+    // di heartbeat (ping/pong su engine.io), indipendentemente da un
+    // 'disconnect' pulito, quindi il conteggio si autocorregge da solo.
     io.on('connection', async (socket) => {
       const username = socket.handshake.auth.username || 'Anonimo';
-      await pubClient.hSet('active_users', socket.id, username);
-      
+      // Salviamo lo username sui dati del socket: fetchSockets() lo
+      // restituisce anche per i socket connessi ad ALTRI pod, perché
+      // l'adapter Redis sincronizza socket.data cluster-wide.
+      socket.data.username = username;
+
       const broadcastActiveUsers = async () => {
-        const usersMap = await pubClient.hGetAll('active_users');
-        const uniqueUsers = [...new Set(Object.values(usersMap))];
+        const sockets = await io.fetchSockets();
+        const uniqueUsers = [...new Set(sockets.map(s => s.data.username))];
         io.emit('users_update', uniqueUsers);
       };
 
       await broadcastActiveUsers();
 
       socket.on('disconnect', async () => {
-        await pubClient.hDel('active_users', socket.id);
         await broadcastActiveUsers();
       });
     });
@@ -252,18 +271,20 @@ async function startServer() {
     });
 
     // --- B) LEADER ELECTION & BACKGROUND TASK ---
+    // Task: Ogni 10 secondi, il Leader scala gli incidenti vecchi di 5 minuti
     const LEADER_KEY = 'leader:escalation';
     const LEADER_TTL = 15000; // 15 secondi
     const TASK_INTERVAL = 10000; // 10 secondi
 
     setInterval(async () => {
       try {
-        // 1. Provo a prendere la leadership se nessuno ce l'ha (SET NX)
+        // 1. Proviamo a prendere la leadership se nessuno ce l'ha (SET NX)
         let isLeader = await pubClient.set(LEADER_KEY, podId, { NX: true, PX: LEADER_TTL });
         
-        // 2. Se non presa, proviamo a rinnovarla atomicamente:
+        // 2. Se non l'abbiamo presa, proviamo a rinnovarla ATOMICAMENTE:
         // lo script Lua verifica che il valore sia ancora il nostro podId
-        // e solo in quel caso estende il TTL, in un'unica operazione indivisibile
+        // e SOLO in quel caso estende il TTL, in un'unica operazione
+        // indivisibile (niente finestra tra "controllo" e "azione").
         if (!isLeader) {
           const renewed = await pubClient.eval(RENEW_LOCK_SCRIPT, {
             keys: [LEADER_KEY],
@@ -274,8 +295,8 @@ async function startServer() {
 
         // 3. Esecuzione esclusiva del Background Task
         if (isLeader) {
-          // console.log(`[LEADER ${podId}] Controllo incidenti da escalated`);
-          const timeoutDate = new Date(Date.now() - 5 * 60 * 1000); // 5 minuti 
+          // console.log(`[LEADER ${podId}] Controllo incidenti da escalare...`);
+          const timeoutDate = new Date(Date.now() - 5 * 60 * 1000); // 5 minuti fa
           
           const result = await db.collection('incidents').updateMany(
             { status: 'open', updatedAt: { $lt: timeoutDate } },
@@ -287,6 +308,8 @@ async function startServer() {
           
           if (result.modifiedCount > 0) {
             console.log(`[LEADER ${podId}] Escalati automaticamente ${result.modifiedCount} incidenti per superamento SLA.`);
+            // NOTA MAGICA: Non serve inviare l'evento Socket.io da qui! 
+            // Il Change Stream di Mongo intercetterà l'updateMany e avviserà tutti i client in realtime.
           }
         }
       } catch (err) {
