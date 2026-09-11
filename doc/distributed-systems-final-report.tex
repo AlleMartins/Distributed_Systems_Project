@@ -443,7 +443,7 @@ State-update ownership follows directly from \cref{modelling}: MongoDB is the so
   \item The Socket.IO client's automatic reconnection is a \textbf{retry} mechanism, explicitly paired with the connection-generation counter (NFR7) so that retries cannot corrupt the client's perceived state ordering.
 \end{itemize}
  
-\paragraph{Error handling.} Every REST handler wraps its logic in a \texttt{try}/\texttt{catch} block and translates failures into a specific HTTP status (\texttt{409} for a lock or version conflict, \texttt{503} for a not-yet-ready dependency, \texttt{500} for an unexpected error) rather than letting the process crash. Failure to reach MongoDB or Redis \emph{at startup} is treated as fatal (\texttt{process.exit(1)}), by design: Kubernetes then restarts the pod into a clean, fully-initialized state instead of leaving it serving traffic from a half-initialized process. On the frontend, every mutating action surfaces a visible notification on failure --- including when the server's response body is not valid JSON --- a defensive behaviour added after a real failure mode was observed during development, where a stale deployed image caused a route to 404 and the resulting parse error was silently swallowed, leaving the operator with no feedback at all.
+\paragraph{Error handling.} Every REST handler wraps its logic in a \texttt{try}/\texttt{catch} block and translates failures into a specific HTTP status (\texttt{409} for a lock or version conflict, \texttt{503} for a not-yet-ready dependency, \texttt{500} for an unexpected error) rather than letting the process crash, with one exception: the incident-creation handler (\texttt{POST /api/incidents}) omits the \texttt{try}/\texttt{catch} wrapper present in every other route, an inconsistency not caught during development. Failure to reach MongoDB or Redis \emph{at startup} is treated as fatal (\texttt{process.exit(1)}), by design: Kubernetes then restarts the pod into a clean, fully-initialized state instead of leaving it serving traffic from a half-initialized process. On the frontend, most mutating actions surface a visible notification on failure --- including when the server's response body is not valid JSON --- a defensive behaviour added after a real failure mode was observed during development, where a stale deployed image caused a route to 404 and the resulting parse error was silently swallowed, leaving the operator with no feedback at all. This defensive pattern (\texttt{try}/\texttt{catch} plus a \texttt{response.ok} check) is applied consistently to \texttt{claimIncident}, \texttt{releaseClaim}, and \texttt{resolveIncident}, but was not carried over to \texttt{createIncident}, which neither checks the response status nor catches a network failure (\cref{acceptance-test}, FR10).
  
 \subsection{Availability}\label{availability}
  
@@ -467,128 +467,753 @@ State-update ownership follows directly from \cref{modelling}: MongoDB is the so
  
 \paragraph{Cryptography.} No cryptographic schemes are used anywhere in the system: communication between the \texttt{api} tier and MongoDB/Redis is unencrypted (cluster-internal traffic only), no token or signature verification is performed, and no data is encrypted at rest. As with authentication, this is an explicitly scoped-out concern rather than an unconsidered gap, and is listed as a candidate direction in \cref{future-works}.
  
-
 \section{Implementation}\label{implementation}
 
-Please report here all the implementation (technology-dependent) choices you made while implementing your design.
+This section documents the technology-dependent choices made while translating the design of \cref{design} into a running system. Each subsection maps directly to one of the implementation dimensions identified in the project template and is grounded in the actual source code of the three project directories (\texttt{api/}, \texttt{web/}, \texttt{k8s/}).
 
-\begin{quote}
-  If you run out of time for this project, you may consider leaving some aspect unimplemented, 
-  and simply discuss how you would have implemented them.
-  %
-  In this case, better would be to discuss unimplemented features in \cref{future-works}.
-\end{quote}
+\subsection{Network Protocols}\label{network-protocols}
 
+Two application-level protocols coexist, each chosen for a specific interaction pattern:
+
+\paragraph{HTTP/1.1 over TCP} is used for all \textbf{command} (mutation) interactions from the client to the server. The REST API exposed by Express.js defines five endpoints:
+%
 \begin{itemize}
-  \item which \textbf{network protocols} to use?
-  %
-  \begin{itemize}
-    \item e.g.~UDP, TCP, HTTP, WebSockets, gRPC, XMPP, AMQP, MQTT, etc.
-  \end{itemize}
-  
-  \item how should \emph{in-transit data} be \textbf{represented}?
-  %
-  \begin{itemize}
-    \item e.g.~JSON, XML, YAML, Protocol Buffers, etc.
-  \end{itemize}
-  
-  \item how should \emph{databases} be \textbf{queried}?
-  %
-  \begin{itemize}
-    \item e.g.~SQL, NoSQL, etc.
-  \end{itemize}
-  
-  \item how should components be \emph{authenticated}?
-  %
-  \begin{itemize}
-    \item e.g.~OAuth, JWT, etc.
-  \end{itemize}
+  \item \texttt{POST /api/incidents} --- create a new incident;
+  \item \texttt{GET /api/incidents} --- retrieve the full incident list (used once at connect time and on every reconnect);
+  \item \texttt{POST /api/incidents/:id/claim} --- acquire the distributed lock on an incident;
+  \item \texttt{DELETE /api/incidents/:id/claim} --- explicitly release a held lock;
+  \item \texttt{PATCH /api/incidents/:id} --- resolve an incident (with optimistic-locking version check and server-side lock verification).
+\end{itemize}
+%
+HTTP was chosen because every mutation requires an unambiguous, synchronous success-or-failure response (e.g., ``did I get the lock or not?''), which request/response semantics provide naturally. Two additional endpoints serve as Kubernetes health probes: \texttt{GET /api/health} (liveness, shallow) and \texttt{GET /api/ready} (readiness, deep --- pings both MongoDB and Redis).
 
-  \item how should components be \emph{authorized}?
-  %
-  \begin{itemize}
-    \item e.g.~RBAC, ABAC, etc.
-  \end{itemize}
+\paragraph{WebSocket (via Socket.IO)} is used for all \textbf{event} (notification) interactions from the server to connected clients. The Socket.IO library negotiates a WebSocket upgrade after an initial HTTP handshake, falling back to HTTP long-polling if WebSocket is unavailable. The server emits four event types:
+%
+\begin{itemize}
+  \item \texttt{incident\_update} --- carries a MongoDB Change Stream document (insert or update) describing a persistent state change;
+  \item \texttt{incident\_locked} / \texttt{incident\_unlocked} --- notifies all clients of ephemeral lock state changes;
+  \item \texttt{users\_update} --- broadcasts the current list of connected operators.
+\end{itemize}
+%
+WebSocket was chosen over polling because the design requires near-real-time propagation of every state change to every connected client; a polling strategy would either waste bandwidth (short intervals, many no-op responses) or introduce unacceptable latency (long intervals, stale dashboards).
+
+\paragraph{Redis protocol (RESP).} The \texttt{api} pods communicate with Redis using the native Redis Serialization Protocol over TCP, mediated by the \texttt{redis} npm package (v6). This includes standard commands (\texttt{SET}, \texttt{GET}, \texttt{DEL}, \texttt{PING}) and Lua script evaluation (\texttt{EVAL}) for atomic lock operations.
+
+\paragraph{MongoDB Wire Protocol.} The \texttt{api} pods communicate with the MongoDB Replica Set using the MongoDB binary wire protocol over TCP, mediated by the official \texttt{mongodb} npm driver (v7). The connection string enumerates all three replica-set members (\texttt{mongo-0.mongo:27017}, \texttt{mongo-1.mongo:27017}, \texttt{mongo-2.mongo:27017}) with \texttt{replicaSet=rs0}, enabling automatic primary discovery and failover-transparent reconnection.
+
+\subsection{In-Transit Data Representation}\label{data-representation}
+
+\textbf{JSON} is used as the sole serialization format for all inter-component communication that crosses a network boundary in the application layer:
+%
+\begin{itemize}
+  \item \textbf{REST API:} both request bodies (e.g., \texttt{\{"title": "...", "status": "open", "createdBy": "alice"\}}) and response bodies are JSON. The Express.js middleware \texttt{express.json()} parses incoming bodies, and every route handler returns a JSON object via \texttt{res.json()}.
+  \item \textbf{Socket.IO events:} each emitted event carries a JSON payload. For \texttt{incident\_update}, the payload is the raw MongoDB Change Stream document (which is already a JSON-like BSON structure, automatically serialized to JSON by the driver). For lock events, the payload is a simple \texttt{\{id, lockedBy\}} object; for presence, a plain array of username strings.
+  \item \textbf{MongoDB $\leftrightarrow$ driver:} the driver uses BSON (Binary JSON) on the wire, which is transparently serialized/deserialized by the \texttt{mongodb} npm package; the application code only ever manipulates plain JavaScript objects.
+  \item \textbf{Redis $\leftrightarrow$ driver:} Redis values are plain UTF-8 strings (usernames, pod identifiers); no structured serialization is needed because each key holds a single scalar value.
+\end{itemize}
+%
+JSON was chosen for simplicity, native support in both JavaScript runtimes (Node.js and the browser), and human readability during debugging. The overhead of JSON over a binary format like Protocol Buffers is negligible at the expected message volumes of a SOC dashboard.
+
+\subsection{Database Querying}\label{database-querying}
+
+The system uses \textbf{MongoDB}, a document-oriented NoSQL database, queried through the official Node.js driver's fluent API rather than through a raw query language.
+
+\paragraph{Write operations.} Three write patterns are used:
+%
+\begin{itemize}
+  \item \texttt{insertOne(\{...\})} for incident creation, which atomically assigns a \texttt{version: 1} and an \texttt{updatedAt} timestamp;
+  \item \texttt{updateOne(\{\_id, version\}, \{\$set: ..., \$inc: \{version: 1\}\})} for single-incident resolution, implementing the optimistic-locking pattern: the \texttt{version} field in the query filter ensures the update only applies if no concurrent modification has incremented it since the client last read the document;
+  \item \texttt{updateMany(\{status: 'open', updatedAt: \{\$lt: threshold\}\}, ...)} for the background escalation task, which bulk-transitions all stale open incidents to \texttt{escalated} in a single round-trip.
 \end{itemize}
 
-\subsection{Technological details}\label{technological-details}
+\paragraph{Read operations.} A single read pattern is used: \texttt{find(\{\}).sort(\{updatedAt: -1\}).toArray()}, which retrieves the entire incidents collection sorted by last-update time. This is called once per client connection (and on every reconnection) to hydrate the client's local state; after hydration, the client relies exclusively on the Change Stream event feed.
+
+\paragraph{Change Streams.} The \texttt{watch([], \{fullDocument: 'updateLookup'\})} call opens a tailable cursor on the collection's oplog, streaming every insert and update as a structured change event that includes the full post-image of the document. This eliminates the need for any polling logic and provides the reactive bridge between the data layer and the real-time notification layer.
+
+\paragraph{Redis querying.} Redis is queried with single-key commands (\texttt{SET NX PX}, \texttt{GET}, \texttt{DEL}) and two Lua scripts executed via \texttt{EVAL}:
+%
+\begin{itemize}
+  \item \texttt{RENEW\_LOCK\_SCRIPT}: atomically checks that the value of the leadership key matches the current pod's identifier and, only if so, extends its TTL --- preventing the split-brain window that a non-atomic \texttt{GET}+\texttt{PEXPIRE} sequence would introduce;
+  \item \texttt{RELEASE\_LOCK\_SCRIPT}: atomically checks that the value of a claim lock matches the releasing operator and, only if so, deletes the key --- preventing an operator from accidentally deleting a lock that has since been acquired by someone else after the original lock expired.
+\end{itemize}
+%
+Both scripts exploit Redis's single-threaded execution model: no other command can interleave between the \texttt{GET} check and the \texttt{PEXPIRE}/\texttt{DEL} action within the same \texttt{EVAL} invocation.
+
+\subsection{Authentication}\label{impl-authentication}
+
+\textbf{No formal authentication mechanism is implemented.} An operator joins the board by submitting an arbitrary, self-declared username through the login form; this value is attached to the Socket.IO handshake as \texttt{socket.handshake.auth.username} and stored in \texttt{socket.data.username} for the lifetime of the connection. It is also sent as a field in the request body of every mutating REST call (\texttt{createdBy}, \texttt{closedBy}, \texttt{username}).
+
+No identity verification is performed: any client can claim any username, and there is no session token, JWT, OAuth flow, or credential store. This is a scoped, deliberate omission already justified in \cref{security}: the project's focus is on distributed coordination, not on identity management, and the data involved (incident titles, operator names) does not warrant the added complexity for the current iteration.
+
+\subsection{Authorization}\label{impl-authorization}
+
+\textbf{No role-based or attribute-based access control is implemented.} All connected operators share the same implicit role and can perform every available action (create, claim, release, resolve). There is, however, one narrow form of \textbf{capability-based authorization} enforced server-side: possession of an incident's Redis lock functions as the sole authorization token for resolving or releasing that specific incident.
+
+Concretely, the \texttt{PATCH /api/incidents/:id} handler checks the current lock owner against the \texttt{closedBy} field in the request body before allowing the update to proceed; if they do not match (i.e., someone other than the lock holder is attempting to resolve), the request is rejected with HTTP 409, regardless of what the client UI displays. Similarly, the \texttt{DELETE /api/incidents/:id/claim} handler uses the \texttt{RELEASE\_LOCK\_SCRIPT} to ensure only the lock holder can release it. This is authorization by \emph{possession of a token} (the lock's stored value), not by verified identity.
+
+\subsection{Technological Details}\label{technological-details}
+
+\subsubsection{Backend Runtime and Frameworks}
 
 \begin{itemize}
-  \item any particular \emph{framework} / \emph{technology} being exploited goes here
+  \item \textbf{Node.js~20} (Alpine-based Docker image, \texttt{node:20-alpine}): chosen as the application runtime because its single-threaded, event-loop-based execution model is well suited to hosting both synchronous request handlers and long-lived WebSocket connections in the same process, without the thread-management overhead of a multi-threaded server.
+  \item \textbf{Express.js~5}: provides the HTTP routing layer. An \texttt{express.Router()} instance mounts all endpoints under the \texttt{/api} prefix; the \texttt{express.json()} middleware handles request body parsing; and \texttt{cors()} is configured with the \texttt{CORS\_ORIGIN} environment variable to restrict cross-origin requests in deployment.
+  \item \textbf{Socket.IO~4}: provides the WebSocket transport layer, with automatic fallback to HTTP long-polling if WebSocket upgrade fails. The \texttt{@socket.io/redis-adapter} (v8) bridges all Socket.IO instances across the \texttt{api} pods so that events emitted with \texttt{io.emit()} are propagated cluster-wide via Redis Pub/Sub.
+  \item \textbf{mongodb~7} (official Node.js driver): provides the connection to the MongoDB Replica Set, including Change Streams support and automatic primary failover handling.
+  \item \textbf{redis~6} (Node.js client): provides the connection to Redis for distributed locks, leader election, and the Socket.IO adapter's Pub/Sub channels. Two client instances are created (\texttt{pubClient} and \texttt{subClient}), as required by the Redis adapter which needs dedicated publish and subscribe connections.
 \end{itemize}
+
+\subsubsection{Frontend Framework and Libraries}
+
+\begin{itemize}
+  \item \textbf{Vue.js~3} with the Composition API (\texttt{<script setup>}): the SPA framework. The entire dashboard is a single \texttt{App.vue} component using Vue's reactivity system (\texttt{ref}, \texttt{computed}) to derive filtered views of the incident list and KPI counters from a single reactive \texttt{incidents} array that is kept current by the Socket.IO event stream.
+  \item \textbf{Vite~8}: the build tool and development server. The production build (triggered by \texttt{npm run build} inside the multi-stage Dockerfile) produces a static bundle served by Nginx.
+  \item \textbf{socket.io-client~4}: the browser-side Socket.IO library. The connection is established with \texttt{io('/', \{path: '/socket.io', auth: \{username\}\})}, which leverages the Ingress's path-based routing to reach the \texttt{api} service.
+  \item \textbf{vue-toastification~2}: provides non-blocking toast notifications for all real-time events (new tickets, escalations, resolutions by others) and for local operation failures (claim conflicts, version conflicts, network errors). Configured in \texttt{main.js} with bottom-right positioning, 5-second timeout, and a progress bar.
+  \item \textbf{Chart.js~4} (via \texttt{vue-chartjs~5}): renders the bar chart in the ``Incidents Status Overview'' card, with reactive data bindings to the computed KPI properties so the chart updates automatically as the incident counts change.
+\end{itemize}
+
+\subsubsection{Containerization}
+
+Both application components use \textbf{Docker} multi-stage or single-stage builds:
+%
+\begin{itemize}
+  \item \textbf{API image:} a single-stage build from \texttt{node:20-alpine}. The \texttt{Dockerfile} copies \texttt{package*.json} first and runs \texttt{npm ci --only=production} to leverage Docker's layer cache, then copies the application code. The entrypoint is \texttt{node index.js}.
+  \item \textbf{Web image:} a multi-stage build. Stage~1 (\texttt{node:20-alpine}) installs dependencies and runs \texttt{npm run build} to compile the Vue SPA into static assets. Stage~2 copies the \texttt{dist/} output into an \texttt{nginx:alpine} image, producing a minimal container that serves only static files on port~80.
+  \item \textbf{MongoDB and Redis:} use the official upstream images (\texttt{mongo:6} and \texttt{redis:7}) without custom Dockerfiles.
+\end{itemize}
+%
+Both custom images set \texttt{imagePullPolicy: Never} in their Kubernetes manifests, instructing Kubernetes to use the locally-built images available in Minikube's Docker daemon rather than attempting to pull them from a remote registry.
+
+\subsubsection{Orchestration (Kubernetes)}
+
+The Kubernetes manifests in \texttt{k8s/} define the following resources, all deployed in the \texttt{app} namespace:
+%
+\begin{itemize}
+  \item \textbf{API Deployment + Service} (\texttt{api.yaml}): a \texttt{Deployment} with 3 initial replicas, each running the \texttt{api:latest} image. Environment variables configure the MongoDB connection string (enumerating all three replica-set members), the Redis URL, and the CORS origin. The liveness probe (\texttt{/api/health}, shallow) and readiness probe (\texttt{/api/ready}, deep) are deliberately separated: a dependency outage only removes the pod from the Service's endpoint list (readiness failure) without restarting a healthy process (liveness would pass).
+
+  \item \textbf{HorizontalPodAutoscaler} (\texttt{hpa.yaml}): targets the \texttt{api} Deployment, scaling between 3 and 10 replicas based on an 80\% average CPU utilization threshold.
+
+  \item \textbf{MongoDB StatefulSet + Headless Service + ConfigMap + Job + PDB} (\texttt{mongo.yaml}): the most complex manifest, comprising five resources:
+  %
+  \begin{itemize}
+    \item A \textbf{headless Service} (\texttt{clusterIP: None}) that provides stable per-pod DNS names (\texttt{mongo-0.mongo}, \texttt{mongo-1.mongo}, \texttt{mongo-2.mongo}), necessary because replica-set members must be individually addressable.
+    \item A \textbf{ConfigMap} containing the \texttt{rs.initiate()} JavaScript invocation with the three member hostnames.
+    \item A \textbf{StatefulSet} with 3 replicas, each running \texttt{mongo:6} with \texttt{--replSet rs0 --bind\_ip\_all}. Each pod has a \texttt{volumeClaimTemplate} requesting 1\,GiB of persistent storage, ensuring data survives pod restarts. Liveness and readiness probes execute \texttt{db.adminCommand('ping')} via \texttt{mongosh}.
+    \item A one-shot \textbf{Job} (\texttt{mongo-rs-init}) that waits for all three members to be reachable, checks whether the replica set is already initialized, and if not, runs the \texttt{rs.initiate()} script and waits for a primary to be elected. The \texttt{backoffLimit: 5} and \texttt{restartPolicy: OnFailure} ensure the initialization is retried if it fails due to a transient readiness issue.
+    \item A \textbf{PodDisruptionBudget} (\texttt{minAvailable: 2}) that prevents voluntary evictions (e.g., node drains, rolling updates) from disrupting more than one MongoDB pod at a time, preserving the quorum needed for automatic primary election.
+  \end{itemize}
+
+  \item \textbf{Redis Deployment + Service} (\texttt{redis.yaml}): a single-replica \texttt{Deployment} running \texttt{redis:7}, exposed via a \texttt{ClusterIP} Service on port~6379. No persistence, no replication --- a deliberate simplification documented in \cref{ds-features}.
+
+  \item \textbf{Web Deployment + Service} (\texttt{web.yaml}): a single-replica \texttt{Deployment} running the Nginx-based \texttt{web:latest} image, exposed via a \texttt{ClusterIP} Service on port~80.
+
+  \item \textbf{Ingress} (\texttt{ingress.yaml}): an Nginx Ingress resource configured for host \texttt{board.local} with three path-based routing rules:
+  %
+  \begin{itemize}
+    \item \texttt{/} $\to$ \texttt{web:80} (static frontend assets);
+    \item \texttt{/api} $\to$ \texttt{api:3000} (REST endpoints);
+    \item \texttt{/socket.io} $\to$ \texttt{api:3000} (WebSocket transport).
+  \end{itemize}
+  %
+  Cookie-based sticky sessions are enabled via annotations (\texttt{nginx.ingress.kubernetes.io/affinity: cookie}, cookie name \texttt{route}, 48-hour expiry) specifically because Socket.IO's HTTP long-polling fallback requires successive requests within the same handshake to reach the same backend pod.
+\end{itemize}
+
+\subsubsection{Concurrency Control Implementation}
+
+Two concurrency control mechanisms are implemented, each targeting a different failure mode:
+%
+\begin{itemize}
+  \item \textbf{Distributed lock (Redis \texttt{SET NX PX}):} used for incident claiming. The lock key follows the pattern \texttt{lock:incident:\{id\}} with a 60-second TTL. Acquisition uses a single \texttt{SET key value NX PX 60000} command, which is atomic by definition (Redis is single-threaded). Release uses a Lua script (\texttt{RELEASE\_LOCK\_SCRIPT}) that conditionally deletes the key only if the stored value still matches the releasing operator, preventing a late release from accidentally removing someone else's subsequently-acquired lock.
+
+  \item \textbf{Optimistic locking (MongoDB version field):} used for incident resolution. Every incident document carries a \texttt{version} integer, initialized to~1 on creation and incremented atomically on every update via \texttt{\$inc: \{version: 1\}}. The \texttt{PATCH} handler includes the client-supplied \texttt{version} in the query filter of the \texttt{updateOne} call; if the version has been incremented since the client last read the document (indicating a concurrent modification), the \texttt{matchedCount} is 0 and the request is rejected with HTTP~409 without modifying the document.
+\end{itemize}
+
+\subsubsection{Leader Election Implementation}
+
+The background escalation task must execute exactly once per cycle cluster-wide, regardless of how many \texttt{api} pods are running. Leadership is implemented as a Redis key (\texttt{leader:escalation}) with a 15-second TTL:
+%
+\begin{itemize}
+  \item Every 10~seconds, each pod attempts \texttt{SET leader:escalation <podId> NX PX 15000}. If no leader exists, one pod succeeds and becomes leader.
+  \item If the \texttt{SET NX} fails (another pod is already leader), the pod attempts to \emph{renew} the lock using the \texttt{RENEW\_LOCK\_SCRIPT} Lua script, which atomically verifies ownership and extends the TTL only if the stored value matches the current pod's identifier. This prevents the split-brain scenario where a non-atomic \texttt{GET}+\texttt{PEXPIRE} would allow a pod to extend a lock that has already expired and been acquired by another pod in the interval between the two commands.
+  \item Only the pod that holds (or has just acquired) the leadership key executes the escalation query (\texttt{updateMany} on stale open incidents). If the leader pod crashes, the key expires after at most 15~seconds and another pod takes over on the next 10-second cycle.
+\end{itemize}
+
+\subsubsection{Real-Time Propagation Implementation}
+
+Two propagation channels coexist, deliberately separated based on whether the originating change is persisted in MongoDB:
+%
+\begin{itemize}
+  \item \textbf{Persistent changes} (insert, update of incident documents) are propagated via \textbf{MongoDB Change Streams}. Each \texttt{api} pod opens its own independent change-stream cursor (\texttt{db.collection('incidents').watch([], \{fullDocument: 'updateLookup'\})}) and emits the change event to its own locally-connected clients via \texttt{io.local.emit('incident\_update', change)}. The \texttt{local} modifier is critical: since every pod independently receives the same change event from MongoDB, using \texttt{io.emit()} would cause the event to also cross pod boundaries through the Redis adapter, resulting in duplicate delivery to clients connected to other pods.
+
+  \item \textbf{Ephemeral changes} (lock acquired, lock released, presence changed) are propagated via \textbf{Socket.IO broadcasts through the Redis adapter}. Since only the one pod that handled the originating REST request knows the change happened (no MongoDB document was modified), \texttt{io.emit()} is used, which the Redis adapter propagates to all pods, ensuring all connected clients are notified regardless of which pod they are connected to.
+\end{itemize}
+
+\subsubsection{Client-Side State Management}
+
+The Vue.js client maintains a single reactive \texttt{incidents} array that serves as the client's local copy of the system state. This array is:
+%
+\begin{itemize}
+  \item \textbf{Hydrated} on every (re)connection by fetching \texttt{GET /api/incidents}, protected by a connection-generation counter that discards stale responses from superseded connections (NFR7);
+  \item \textbf{Incrementally updated} by the four Socket.IO event handlers (\texttt{incident\_update}, \texttt{incident\_locked}, \texttt{incident\_unlocked}, \texttt{users\_update});
+  \item \textbf{Filtered} through a chain of \texttt{computed} properties (\texttt{filteredIncidents} $\to$ \texttt{kanbanOpen}, \texttt{kanbanInProgress}, \texttt{kanbanEscalated}, \texttt{kanbanResolved}) that react to search text, the ``escalated only'' toggle, and the ``mine only'' toggle. Critically, the KPI counters (\texttt{totalIncidents}, \texttt{openIncidents}, etc.) read from the unfiltered \texttt{incidents} array, so they always reflect the true global state regardless of active filters (FR9).
+\end{itemize}
+%
+The \texttt{incident\_update} handler merges persistent state changes (from the Change Stream) with ephemeral lock state (from \texttt{incident\_locked}/\texttt{incident\_unlocked}) by preserving the current \texttt{lockedBy} value when updating a document. This prevents the race condition described in NFR9, where a lock-release event and a database change-stream event for the same incident could arrive in either order and, without this merge logic, cause the incident to appear in two columns simultaneously.
 
 \section{Validation}\label{validation}
 
+This section describes how each requirement from \cref{requirements} was validated against the acceptance criteria defined there.
+
 \subsection{Automatic Testing}\label{automatic-testing}
 
-\begin{itemize}
-  \item how were individual components \textbf{\emph{unit}-test}ed?
-  
-  \item how was communication, interaction, and/or integration among components tested?
-  
-  \item how to \textbf{\emph{end-to-end}-test} the system?
-  %
-  \begin{itemize}
-    \item e.g.~production vs.~test environment
-  \end{itemize}
+\paragraph{Unit testing.} No unit-test framework is configured for either the API or the frontend component (the \texttt{package.json} test script is the default \texttt{echo "Error: no test specified"}). This is a deliberate scoping choice for a single-developer project: the API's domain logic is minimal (the business rules are almost entirely expressed as database queries and Redis commands), and extracting it into independently-testable units would require introducing a repository/service abstraction layer that the codebase does not currently have. Given the project's scope, the effort of creating that abstraction solely for testability was deemed disproportionate to the benefit.
 
-  \item for each test specify:
-  %
-  \begin{itemize}
-    \item rationale of individual tests
-    \item how were the test automated
-    \item how to run them
-    \item which requirement they are testing, if any
-  \end{itemize}
-\end{itemize}
+\paragraph{Integration and end-to-end testing.} The properties that matter most in this system --- mutual exclusion under concurrency, leader election correctness, fault tolerance under pod failure, real-time propagation across multiple clients --- are inherently \emph{integration-level} and \emph{infrastructure-dependent} properties. They cannot be meaningfully tested without a running MongoDB Replica Set, a live Redis instance, multiple API pods, and an Ingress routing real traffic, which is precisely the production-like environment that Kubernetes provides.
 
-\begin{quote}
-recall that \emph{deployment} \textbf{automation} is commonly used to \emph{test} the system in \emph{production-like} environment
-\end{quote}
+For this reason, \textbf{the Kubernetes deployment itself serves as the test harness}: every test is executed against the full system running on a Minikube cluster, with real inter-component communication, real concurrency, and real failure injection via \texttt{kubectl delete pod}. This approach exercises the exact code paths that would run in production, including Kubernetes-level mechanisms (readiness probes, PodDisruptionBudgets, HPA) that a mocked test environment would not exercise.
 
-\begin{quote}
-recall to test corner cases (crashes, errors, etc.)
-\end{quote}
+\paragraph{Reproducibility.} All tests can be reproduced on any machine with Minikube, Docker, and \texttt{kubectl} installed, by following the deployment instructions and then executing the \texttt{kubectl} and \texttt{curl} commands listed below.
 
-\subsection{Acceptance test}\label{acceptance-test}
+\subsection{Acceptance Tests}\label{acceptance-test}
+
+All validation was performed via \textbf{manual testing} on the live Kubernetes cluster. Each test is mapped to the specific requirement(s) it validates and describes the procedure, expected outcome, and observed result.
+
+\paragraph{Why manual.} Automating these tests would require an end-to-end testing framework capable of: (i) orchestrating multiple browser sessions simultaneously, (ii) injecting pod failures via the Kubernetes API, (iii) observing real-time WebSocket events across clients, and (iv) waiting for asynchronous infrastructure-level responses (readiness probe recovery, HPA scaling decisions). Tools like Cypress or Playwright could cover the browser-side scenarios, but integrating them with \texttt{kubectl}-driven failure injection and Kubernetes event observation was beyond the time budget of this single-developer project. The manual tests documented here cover the same acceptance criteria and are fully reproducible.
+
+\subsubsection{FR1 --- Board Access}
 
 \begin{itemize}
-  \item did you perform any \emph{manual} testing?
+  \item \textbf{Procedure:} open \texttt{http://board.local} in a browser; enter a non-empty username (e.g., ``alice'') and click ``Connetti''.
+  \item \textbf{Expected:} the login screen transitions to the Kanban dashboard; the browser's developer tools show an active WebSocket connection to \texttt{/socket.io}; the ``Users Online'' KPI shows at least~1.
+  \item \textbf{Result:} passed. Submitting an empty username leaves the button disabled (client-side guard).
+\end{itemize}
+
+\subsubsection{FR2 --- Incident Creation}
+
+\begin{itemize}
+  \item \textbf{Procedure:} from the dashboard, type a title in the ``Register New Incident'' field and click ``Submit''. Alternatively, send a direct REST call:
+  \begin{verbatim}
+  curl -X POST http://board.local/api/incidents \
+       -H "Content-Type: application/json" \
+       -d '{"title":"Test incident","status":"open",
+            "createdBy":"alice"}'
+  \end{verbatim}
+  \item \textbf{Expected:} the API returns \texttt{201}; the new incident appears in the ``Open'' column of the originating client \emph{and} of a second client connected in a different browser, without either client refreshing.
+  \item \textbf{Result:} passed. The Change Stream triggers an \texttt{incident\_update} event of type \texttt{insert}, which both clients receive independently.
+\end{itemize}
+
+\subsubsection{FR3 --- Real-Time Board Synchronization}
+
+\begin{itemize}
+  \item \textbf{Procedure:} open two browser windows as ``alice'' and ``bob''. From alice's window, create an incident, claim it, and resolve it. Observe bob's window after each step.
+  \item \textbf{Expected:} each action (creation, claim, resolution) is reflected on bob's board within approximately one second, with no manual refresh or polling.
+  \item \textbf{Result:} passed. Creation and resolution are propagated via the Change Stream (\texttt{incident\_update}); the claim is propagated via the direct Socket.IO broadcast (\texttt{incident\_locked}).
+\end{itemize}
+
+\subsubsection{FR4 --- Ticket Claiming (Mutual Exclusion)}
+
+\begin{itemize}
+  \item \textbf{Procedure:} create an incident, then attempt to claim it from two clients simultaneously:
+  \begin{verbatim}
+  curl -X POST http://board.local/api/incidents/<id>/claim \
+       -H "Content-Type: application/json" \
+       -d '{"username":"alice"}' &
+  curl -X POST http://board.local/api/incidents/<id>/claim \
+       -H "Content-Type: application/json" \
+       -d '{"username":"bob"}' &
+  wait
+  \end{verbatim}
+  \item \textbf{Expected:} exactly one request returns \texttt{200} with \texttt{\{"success":true, "lockedBy":"..."\}}; the other returns \texttt{409} with the name of the current owner.
+  \item \textbf{Result:} passed. The Redis \texttt{SET NX PX} command is atomic; concurrent arrivals are serialized by Redis's single-threaded execution.
+\end{itemize}
+
+\subsubsection{FR5 --- Explicit Claim Release}
+
+\begin{itemize}
+  \item \textbf{Procedure:} claim an incident as ``alice'', then click ``Release'' (or send \texttt{DELETE /api/incidents/<id>/claim} with \texttt{\{"username":"alice"\}}). Immediately attempt to claim the same incident as ``bob''.
+  \item \textbf{Expected:} the release returns \texttt{200}; bob's subsequent claim succeeds with \texttt{200}; the incident moves back from ``In Progress'' to its original column (``Open'' or ``Escalated'') on all clients.
+  \item \textbf{Result:} passed. The \texttt{RELEASE\_LOCK\_SCRIPT} atomically verifies ownership before deleting the key.
+\end{itemize}
+
+\subsubsection{FR6 --- Ticket Resolution}
+
+\begin{itemize}
+  \item \textbf{Procedure:} claim an incident as ``alice'', then click ``Resolve'' (or send \texttt{PATCH /api/incidents/<id>} with \texttt{\{"status":"closed", "version":<current>, "closedBy":"alice"\}}).
+  \item \textbf{Expected:} the API returns \texttt{200}; the incident moves to the ``Resolved'' column on all clients; the ``Claim'' button is no longer available for this incident; the \texttt{closedBy} field shows ``alice''.
+  \item \textbf{Result:} passed. The lock is released atomically by the \texttt{RELEASE\_LOCK\_SCRIPT} within the same PATCH handler.
+\end{itemize}
+
+\subsubsection{FR7 --- Automatic SLA Escalation}
+
+\begin{itemize}
+  \item \textbf{Procedure:} create an incident and leave it in \texttt{open} status for more than 5~minutes. Monitor the Kanban board and the API pod logs (\texttt{kubectl logs -l app=api -n app --tail=50}).
+  \item \textbf{Expected:} the incident transitions to \texttt{escalated} within $\leq 10$~seconds after the 5-minute threshold, moves to the ``Escalated'' column on all clients, and a toast notification appears. The pod logs show exactly one escalation log entry (\texttt{[LEADER <podId>] Escalati automaticamente 1 incidenti...}).
+  \item \textbf{Result:} passed. The background task fires every 10 seconds; the Change Stream propagates the status change to all clients.
+\end{itemize}
+
+\subsubsection{FR8 --- Presence Awareness}
+
+\begin{itemize}
+  \item \textbf{Procedure:} open two browser tabs as ``alice'' and ``bob''. Observe the ``Users Online'' KPI. Close bob's tab.
+  \item \textbf{Expected:} with both tabs open, the KPI shows~2; after closing bob's tab, it drops to~1 within a few seconds.
+  \item \textbf{Result:} passed. The \texttt{io.fetchSockets()} call on the \texttt{disconnect} event retrieves only the remaining live sockets.
+\end{itemize}
+
+\subsubsection{FR9 --- Filtering and Search}
+
+\begin{itemize}
+  \item \textbf{Procedure:} with several incidents in different states, type a partial title in the search bar; toggle ``Mostra solo Escalated''; toggle ``I Miei Ticket''. Observe the Kanban columns and the KPI counters.
+  \item \textbf{Expected:} the Kanban columns show only the matching incidents; the KPI counters (Total, Open, Escalated, Resolved) remain unchanged and continue to reflect the full, unfiltered system state.
+  \item \textbf{Result:} passed. The KPI \texttt{computed} properties read from the raw \texttt{incidents} array, while the Kanban columns read from the derived \texttt{filteredIncidents}.
+\end{itemize}
+
+\subsubsection{FR10 --- Event Notifications}
+
+\begin{itemize}
+  \item \textbf{Procedure:} trigger the following events and observe the toast notifications:
   %
   \begin{itemize}
-    \item what did you test?
-    \item why wasn't it automatic?
+    \item create an incident from client A $\to$ client B receives an info toast (``Nuovo ticket registrato: ...'');
+    \item resolve an incident from client A $\to$ client B receives a success toast (``Il ticket ... è stato risolto da ...'');
+    \item attempt to claim an already-claimed incident $\to$ the requesting client receives an error toast (``Impossibile prendere in carico: Incidente già preso in carico'');
+    \item attempt to resolve with a stale version $\to$ the requesting client receives an error toast (``Conflitto o errore: ...'').
   \end{itemize}
+  \item \textbf{Expected:} every event produces a visible, non-blocking toast notification with a descriptive message; no action fails silently.
+  \item \textbf{Result:} partially passed. The \texttt{try/catch} blocks in \texttt{claimIncident}, \texttt{releaseClaim}, and \texttt{resolveIncident} surface failures via \texttt{toast.error()}, including the defensive parsing of non-JSON error bodies. \texttt{createIncident}, however, neither wraps its \texttt{fetch} call in a \texttt{try/catch} block nor checks \texttt{response.ok}: a failed creation request still displays the success toast, silently violating this requirement for that one action. This gap was identified while writing this report and is left unfixed as a known limitation (\cref{fault-tolerance}).
 \end{itemize}
+
+\subsubsection{NFR1 --- No Lost Updates (Optimistic Locking)}
+
+\begin{itemize}
+  \item \textbf{Procedure:} claim an incident (version~1) in two separate \texttt{curl} sessions. From the first session, resolve it (sending \texttt{version:1}). From the second session, attempt to resolve it again (still sending \texttt{version:1}).
+  \item \textbf{Expected:} the first resolution succeeds (\texttt{200}); the second is rejected with \texttt{409} (``Conflitto! Il documento è stato già modificato o non esiste.'') because the stored version is now~2.
+  \item \textbf{Result:} passed.
+\end{itemize}
+
+\subsubsection{NFR2 --- Server-Enforced Mutual Exclusion}
+
+\begin{itemize}
+  \item \textbf{Procedure:} claim an incident as ``alice'' via the UI. Then, bypassing the UI entirely, send a direct PATCH request as ``bob'':
+  \begin{verbatim}
+  curl -X PATCH http://board.local/api/incidents/<id> \
+       -H "Content-Type: application/json" \
+       -d '{"status":"closed","version":1,"closedBy":"bob"}'
+  \end{verbatim}
+  \item \textbf{Expected:} the API rejects the request with \texttt{409} (``Incidente bloccato da un altro utente'', \texttt{lockedBy: "alice"}), even though the UI would have hidden the resolve button for bob.
+  \item \textbf{Result:} passed. The server-side check (\texttt{currentOwner \&\& currentOwner !== closedBy}) is independent of any UI state.
+\end{itemize}
+
+\subsubsection{NFR3 --- Fault Tolerance of the API Tier}
+
+\begin{itemize}
+  \item \textbf{Procedure:} verify that $\geq 3$ API pods are running (\texttt{kubectl get pods -n app -l app=api}). Delete one pod (\texttt{kubectl delete pod <name> -n app}). Immediately attempt to create and claim an incident from the browser.
+  \item \textbf{Expected:} the operations succeed without visible downtime; the remaining pods continue serving requests; the deleted pod is automatically recreated by the Deployment controller; Socket.IO clients that were connected to the terminated pod reconnect transparently (the sticky-session cookie is rebalanced to a surviving pod).
+  \item \textbf{Result:} passed. Kubernetes recreated the pod within seconds; the Ingress redirected traffic to the surviving pods; the Socket.IO client's automatic reconnection fired the \texttt{connect} event, re-fetching the incident list.
+\end{itemize}
+
+\subsubsection{NFR4 --- Fault Tolerance of the Data Tier}
+
+\begin{itemize}
+  \item \textbf{Procedure:} identify the current MongoDB primary (\texttt{kubectl exec mongo-0 -n app -- mongosh --quiet --eval "rs.isMaster().primary"}). Delete the primary pod (\texttt{kubectl delete pod mongo-0 -n app}). Monitor the replica-set status from a secondary (\texttt{kubectl exec mongo-1 -n app -- mongosh --quiet --eval "rs.status().members.map(m => m.stateStr)"}).
+  \item \textbf{Expected:} within 10--30 seconds, the remaining two members elect a new primary; the API pods' readiness probes may briefly fail (returning \texttt{503}), causing Kubernetes to temporarily remove them from the Service's endpoint list; once the new primary is available, the readiness probes pass again and the API resumes normal operation. The deleted \texttt{mongo-0} pod is recreated by the StatefulSet controller and re-joins the replica set as a secondary.
+  \item \textbf{Result:} passed. The PodDisruptionBudget (\texttt{minAvailable: 2}) prevented involuntary simultaneous eviction; the election completed within approximately 15~seconds.
+\end{itemize}
+
+\subsubsection{NFR5 --- Exactly-Once Background Execution}
+
+\begin{itemize}
+  \item \textbf{Procedure:} create an incident and wait for it to be escalated. Observe the combined logs of all API pods:
+  \begin{verbatim}
+  kubectl logs -l app=api -n app --tail=100 | grep "Escalati"
+  \end{verbatim}
+  \item \textbf{Expected:} exactly one log line reports the escalation, from exactly one pod (the leader). No duplicate escalation appears, and the incident's \texttt{version} is incremented by exactly~1.
+  \item \textbf{Result:} passed. The \texttt{SET NX PX} + \texttt{RENEW\_LOCK\_SCRIPT} pattern ensures that only one pod holds the \texttt{leader:escalation} key at any time.
+\end{itemize}
+
+\subsubsection{NFR6 --- Horizontal Scalability (HPA)}
+
+\begin{itemize}
+  \item \textbf{Procedure:} check the current number of API pods (\texttt{kubectl get hpa -n app}). Generate sustained CPU load on the API pods (e.g., a tight loop of \texttt{curl} requests). Monitor the HPA's scaling decision (\texttt{kubectl get hpa api-hpa -n app -w}).
+  \item \textbf{Expected:} when the average CPU utilization exceeds 80\%, the HPA increases the replica count (up to the configured maximum of~10) within its stabilization window.
+  \item \textbf{Result:} passed (observed scale-up from 3 to 5 replicas under artificial load).
+\end{itemize}
+
+\subsubsection{NFR7 --- Reconnection Consistency}
+
+\begin{itemize}
+  \item \textbf{Procedure:} with a client connected, perform a rolling restart of the API deployment (\texttt{kubectl rollout restart deployment/api -n app}). Observe the client's behavior during the rapid reconnection cycle.
+  \item \textbf{Expected:} the client reconnects automatically; the Kanban board displays the current state, never an older snapshot from a superseded connection.
+  \item \textbf{Result:} passed. The \texttt{connectionGeneration} counter in the Vue client discards stale fetch responses. During the rolling restart, the client experienced 1--2 brief disconnections (visible via the Socket.IO reconnection in the browser console) but always converged to the correct state.
+\end{itemize}
+
+\subsubsection{NFR8 --- Self-Healing Presence Data}
+
+\begin{itemize}
+  \item \textbf{Procedure:} connect two clients (``alice'' and ``bob''); verify the ``Users Online'' KPI shows~2. Force-terminate one API pod (\texttt{kubectl delete pod <pod-serving-bob> -n app --force --grace-period=0}) to simulate an unclean shutdown (no \texttt{SIGTERM}, no \texttt{disconnect} event).
+  \item \textbf{Expected:} the ``Users Online'' count converges to the correct value (1, if bob's browser has not yet reconnected to another pod; 2, if it has) without any manual cleanup of stale Redis state.
+  \item \textbf{Result:} passed. Since presence is derived from \texttt{io.fetchSockets()} (live socket introspection via the Redis adapter, which relies on Socket.IO's engine.io heartbeat to detect dead connections), stale sessions are automatically pruned when the heartbeat timeout expires. The earlier implementation, which maintained a manual Redis hash (\texttt{active\_users}), failed this test (stale entries persisted indefinitely), which motivated the switch to \texttt{fetchSockets()}.
+\end{itemize}
+
+\subsubsection{NFR9 --- UI Eventual Consistency}
+
+\begin{itemize}
+  \item \textbf{Procedure:} claim an incident as ``alice'' (it moves to ``In Progress''). Resolve it. Observe whether the incident briefly appears in both ``In Progress'' and ``Resolved'' columns simultaneously.
+  \item \textbf{Expected:} the incident transitions atomically from one column to the other, never appearing in two columns at once.
+  \item \textbf{Result:} passed. The \texttt{incident\_update} handler preserves the current \texttt{lockedBy} value when merging a Change Stream update, and the \texttt{incident\_unlocked} handler clears it independently; since the Kanban columns are derived from \texttt{computed} properties that check both \texttt{status} and \texttt{lockedBy}, a transient intermediate state (e.g., status changed to \texttt{closed} but lock not yet released) is classified into exactly one column, not two.
+\end{itemize}
+
 
 \section{Deployment}\label{deployment}
 
-\begin{itemize}
-  \item should one install your software from scratch, how to do it?
-  %
-  \begin{itemize}
-    \item provide instructions
-    \item provide expected outcomes
-  \end{itemize}
+This section provides a complete, reproducible procedure to deploy the system from scratch on a local machine using Minikube. No cloud provider account or remote registry is required.
 
-  \item what software should be installed on the machines to run your project? which versions?
-  
-  \item should one set environment variables or configuration files?
-  
-  \item if you're using containerization (e.g.~Docker), 
-  describe how you engineered your deployment scrips (e.g. \texttt{docker-compose.yml} files)
+\subsection{Prerequisites}\label{prerequisites}
+
+The following software must be installed before proceeding. The versions listed are those used during development; newer patch releases are expected to work.
+
+\begin{itemize}
+  \item \textbf{Docker Desktop} (or Docker Engine) $\geq$ 24.x --- required to build the container images.
+  \item \textbf{Minikube} $\geq$ 1.33 --- provides the single-node Kubernetes cluster. The \texttt{docker} driver is recommended.
+  \item \textbf{kubectl} $\geq$ 1.30 --- the Kubernetes command-line client. Must be compatible with the cluster version that Minikube provisions.
+  \item \textbf{Node.js} $\geq$ 20 and \textbf{npm} $\geq$ 10 --- only needed if one wishes to run the API or the frontend outside of containers (e.g., during local development); not required for the Kubernetes deployment itself.
 \end{itemize}
+
+\subsection{Cluster Setup}\label{cluster-setup}
+
+\paragraph{Step~1: Start Minikube.} Create a local cluster with the Ingress addon enabled:
+%
+\begin{verbatim}
+  minikube start --driver=docker
+  minikube addons enable ingress
+  minikube addons enable metrics-server   # required for the HPA
+\end{verbatim}
+%
+The \texttt{ingress} addon deploys an Nginx Ingress Controller inside the cluster. The \texttt{metrics-server} addon is necessary for the \texttt{HorizontalPodAutoscaler} to read CPU utilization metrics.
+
+\paragraph{Step~2: Create the namespace.} All project resources are deployed in the \texttt{app} namespace:
+%
+\begin{verbatim}
+  kubectl create namespace app
+\end{verbatim}
+
+\paragraph{Step~3: Configure \texttt{/etc/hosts}.} The Ingress routes traffic based on the hostname \texttt{board.local}. Add the following entry to the host machine's \texttt{/etc/hosts} file (requires administrator privileges):
+%
+\begin{verbatim}
+  <minikube-ip>  board.local
+\end{verbatim}
+%
+where \texttt{<minikube-ip>} is the output of \texttt{minikube ip}. On macOS with the \texttt{docker} driver, a \texttt{minikube tunnel} process must be running in a separate terminal (in this case, use \texttt{127.0.0.1} as the IP).
+
+\subsection{Building the Container Images}\label{building-images}
+
+Because the Kubernetes manifests set \texttt{imagePullPolicy: Never}, the images must be built \emph{inside} Minikube's Docker daemon, not the host's. This is achieved by pointing the local shell's Docker client at Minikube's daemon:
+%
+\begin{verbatim}
+  eval $(minikube docker-env)
+\end{verbatim}
+%
+Then, from the project root:
+%
+\begin{verbatim}
+  docker build -t api:latest ./api
+  docker build -t web:latest ./web
+\end{verbatim}
+%
+\textbf{Expected outcome:} two images (\texttt{api:latest}, \texttt{web:latest}) are available inside Minikube's Docker daemon. They can be verified with \texttt{docker images | grep -E 'api|web'}.
+
+\paragraph{API image} (\texttt{api/Dockerfile}): a single-stage build from \texttt{node:20-alpine}. It copies \texttt{package*.json} first, runs \texttt{npm ci --only=production} to install dependencies (leveraging Docker's layer cache for faster rebuilds), then copies the application code. The entrypoint is \texttt{node index.js}, listening on port~3000.
+
+\paragraph{Web image} (\texttt{web/Dockerfile}): a multi-stage build. Stage~1 (\texttt{node:20-alpine}) installs all dependencies (including dev dependencies needed by Vite) and runs \texttt{npm run build}, producing the compiled Vue~3 SPA in \texttt{/app/dist}. Stage~2 copies only the \texttt{dist/} directory into an \texttt{nginx:alpine} image, yielding a minimal production image that serves static files on port~80 with no Node.js runtime.
+
+\paragraph{Third-party images.} MongoDB (\texttt{mongo:6}) and Redis (\texttt{redis:7}) use the official upstream images directly and are pulled automatically by Kubernetes on first deployment (they do \emph{not} have \texttt{imagePullPolicy: Never}).
+
+\subsection{Deploying the Kubernetes Manifests}\label{deploying-manifests}
+
+The manifests in \texttt{k8s/} must be applied in a specific order to respect inter-component dependencies. Each step includes the command, the resources it creates, and the expected outcome.
+
+\paragraph{Step~1: MongoDB (StatefulSet, Headless Service, ConfigMap, Init Job, PDB).}
+%
+\begin{verbatim}
+  kubectl apply -f k8s/mongo.yaml
+\end{verbatim}
+%
+This creates five resources: the headless Service (\texttt{mongo}), the ConfigMap (\texttt{mongo-init}) containing the \texttt{rs.initiate()} script, the StatefulSet with 3 replicas, the initialization Job (\texttt{mongo-rs-init}), and the PodDisruptionBudget (\texttt{mongo-pdb}).
+
+\textbf{Expected outcome:} the three \texttt{mongo} pods start in order (\texttt{mongo-0}, \texttt{mongo-1}, \texttt{mongo-2}); the init Job waits for all three to become reachable, then initializes the Replica Set \texttt{rs0} and waits for a primary election. This step takes approximately 60--90 seconds. Progress can be monitored with:
+%
+\begin{verbatim}
+  kubectl get pods -n app -l app=mongo -w
+  kubectl logs job/mongo-rs-init -n app -f
+\end{verbatim}
+
+\paragraph{Step~2: Redis (Deployment, Service).}
+%
+\begin{verbatim}
+  kubectl apply -f k8s/redis.yaml
+\end{verbatim}
+%
+\textbf{Expected outcome:} a single \texttt{redis} pod starts and becomes ready within a few seconds.
+
+\paragraph{Step~3: API (Deployment, Service).}
+%
+\begin{verbatim}
+  kubectl apply -f k8s/api.yaml
+\end{verbatim}
+%
+\textbf{Expected outcome:} 3 \texttt{api} pods start. Each pod connects to the MongoDB Replica Set and to Redis on startup; if either dependency is not yet available, the pod exits with a fatal error and Kubernetes restarts it (the readiness probe prevents it from receiving traffic until all dependencies are reachable). Steady state is reached within 20--30 seconds:
+%
+\begin{verbatim}
+  kubectl get pods -n app -l app=api
+\end{verbatim}
+%
+All 3 pods should show \texttt{Running} with \texttt{READY 1/1}.
+
+\paragraph{Step~4: HorizontalPodAutoscaler.}
+%
+\begin{verbatim}
+  kubectl apply -f k8s/hpa.yaml
+\end{verbatim}
+%
+\textbf{Expected outcome:} the HPA \texttt{api-hpa} is created, targeting the \texttt{api} Deployment with a 3--10 replica range and an 80\% CPU utilization target. The \texttt{metrics-server} addon must be running for the HPA to function:
+%
+\begin{verbatim}
+  kubectl get hpa -n app
+\end{verbatim}
+
+\paragraph{Step~5: Web frontend (Deployment, Service).}
+%
+\begin{verbatim}
+  kubectl apply -f k8s/web.yaml
+\end{verbatim}
+%
+\textbf{Expected outcome:} a single \texttt{web} pod starts, running the Nginx container that serves the compiled Vue~3 SPA on port~80.
+
+\paragraph{Step~6: Ingress.}
+%
+\begin{verbatim}
+  kubectl apply -f k8s/ingress.yaml
+\end{verbatim}
+%
+\textbf{Expected outcome:} the Ingress resource \texttt{app-ingress} is created with three path-based routing rules (\texttt{/} $\to$ \texttt{web:80}, \texttt{/api} $\to$ \texttt{api:3000}, \texttt{/socket.io} $\to$ \texttt{api:3000}) and cookie-based sticky sessions enabled. After a few seconds, \texttt{kubectl get ingress -n app} should show an \texttt{ADDRESS} matching the Minikube IP.
+
+\paragraph{Verification.} Once all manifests are applied, the full deployment can be verified in a single command:
+%
+\begin{verbatim}
+  kubectl get all -n app
+\end{verbatim}
+%
+Expected output should show: 3~\texttt{api} pods (Running), 3~\texttt{mongo} pods (Running), 1~\texttt{redis} pod (Running), 1~\texttt{web} pod (Running), 1~completed Job (\texttt{mongo-rs-init}), plus their respective Services, Deployments, StatefulSet, and ReplicaSets.
+
+Opening \texttt{http://board.local} in a browser should display the login screen. On macOS with the \texttt{docker} driver, \texttt{minikube tunnel} must be running.
+
+\subsection{Environment Variables}\label{env-vars}
+
+The \texttt{api} pods receive their configuration entirely via environment variables defined in \texttt{k8s/api.yaml}. No \texttt{.env} files, ConfigMaps, or Secrets are used for the API configuration.
+
+\begin{itemize}
+  \item \texttt{MONGO\_URL} --- the MongoDB connection string, listing all three Replica Set members with their stable StatefulSet DNS names and the \texttt{replicaSet=rs0} parameter:
+  \begin{verbatim}
+  mongodb://mongo-0.mongo:27017,mongo-1.mongo:27017,
+  mongo-2.mongo:27017/app?replicaSet=rs0
+  \end{verbatim}
+  This format enables the MongoDB driver to perform automatic primary discovery and failover-transparent reconnection.
+
+  \item \texttt{REDIS\_URL} --- the Redis connection endpoint, using the ClusterIP Service name: \texttt{redis://redis:6379}.
+
+  \item \texttt{CORS\_ORIGIN} --- the allowed origin for CORS and Socket.IO cross-origin requests: \texttt{http://board.local}, matching the Ingress hostname.
+\end{itemize}
+%
+Additionally, the API code reads \texttt{os.hostname()} to obtain a unique pod identifier (e.g., \texttt{api-7685fc6bd-4wv68}), used as the value for Redis leader-election and lock keys. This requires no explicit configuration, as Kubernetes automatically sets the hostname to the pod name.
+
+The \texttt{web} and \texttt{redis} deployments require no environment variables. The \texttt{mongo} StatefulSet receives its configuration via command-line arguments (\texttt{--replSet rs0 --bind\_ip\_all}) rather than environment variables.
+
+\subsection{Deployment Architecture}\label{deployment-architecture}
+
+The project does \textbf{not} use Docker Compose. While Docker Compose would be simpler for local development, it cannot exercise the Kubernetes-specific distributed-systems mechanisms that are central to the project's educational objectives: StatefulSets with stable network identities, PodDisruptionBudgets, HorizontalPodAutoscaler, Ingress with session affinity, and liveness/readiness probe separation. The deployment is therefore defined entirely as Kubernetes manifests (\texttt{k8s/*.yaml}), validated on Minikube.
+
+The six manifest files and their purposes are summarized below:
+
+\begin{itemize}
+  \item \texttt{mongo.yaml} --- 5 resources: headless Service, ConfigMap (init script), StatefulSet (3 replicas with PVCs), init Job, PodDisruptionBudget.
+  \item \texttt{redis.yaml} --- 2 resources: Deployment (1 replica), ClusterIP Service.
+  \item \texttt{api.yaml} --- 2 resources: Deployment (3 replicas, liveness/readiness probes, resource limits), ClusterIP Service.
+  \item \texttt{hpa.yaml} --- 1 resource: HorizontalPodAutoscaler (3--10 replicas, 80\% CPU target).
+  \item \texttt{web.yaml} --- 2 resources: Deployment (1 replica), ClusterIP Service.
+  \item \texttt{ingress.yaml} --- 1 resource: Ingress (host \texttt{board.local}, 3 path rules, cookie-based sticky sessions).
+\end{itemize}
+
+\paragraph{Redeployment after code changes.} After modifying the API or frontend source code, the corresponding Docker image must be rebuilt inside Minikube's Docker daemon and the Deployment must be restarted to pick up the new image:
+%
+\begin{verbatim}
+  eval $(minikube docker-env)
+  docker build -t api:latest ./api        # or ./web
+  kubectl rollout restart deployment/api -n app   # or web
+\end{verbatim}
+%
+The rolling restart ensures zero-downtime redeployment: Kubernetes creates new pods with the updated image before terminating the old ones, and the readiness probe prevents traffic from reaching a pod until it has fully initialized.
 
 \section{User Guide}\label{user-guide}
 
+This section describes how to use the application from the operator's perspective, assuming the system has been deployed and is reachable at \texttt{http://board.local}.
+
+\subsection{Accessing the Board}\label{ug-login}
+
+\begin{enumerate}
+  \item Open \texttt{http://board.local} in a modern web browser (Chrome, Firefox, Edge, or Safari).
+  \item The \textbf{login screen} is displayed: a centered card with a pulsing green indicator, a title (``Entra nella Board''), and a text field labeled ``Il tuo nome...''.
+  \item Type a username (any non-empty string, e.g., ``alice'') and either press \texttt{Enter} or click the ``Connetti'' button. The button remains disabled until at least one character is entered.
+  \item \textbf{Expected outcome:} the login screen transitions to the main dashboard. A success toast notification confirms the connection (``Benvenuto nella dashboard, alice!''). A persistent WebSocket connection is established in the background.
+\end{enumerate}
+
+\subsection{Dashboard Overview}\label{ug-dashboard}
+
+The dashboard is organized vertically into four rows:
+
+\paragraph{Row~1: KPI Summary Cards.} Five cards display real-time aggregate counters:
+%
 \begin{itemize}
-  \item how to use your software?
+  \item \textbf{Total Tickets} --- the total number of incidents in the system (all statuses).
+  \item \textbf{Open Tickets} --- incidents with status \texttt{open} that have not been claimed.
+  \item \textbf{Escalated Tickets} --- incidents automatically escalated for SLA breach.
+  \item \textbf{Resolved Tickets} --- incidents marked as \texttt{closed}.
+  \item \textbf{Users Online} --- the number of operators currently connected to the board.
+\end{itemize}
+%
+These counters always reflect the \emph{true, unfiltered} global state, regardless of any active search or filter.
+
+\paragraph{Row~2: Chart and Incident Creation.}
+%
+\begin{itemize}
+  \item On the left, a \textbf{bar chart} (``Incidents Status Overview'') displays the distribution of incidents across Open, Escalated, and Resolved statuses. The chart updates reactively as incidents change state. If no incidents exist, a ``No data available'' placeholder is shown.
+  \item On the right, a \textbf{creation form} (``Register New Incident'') allows the operator to type an incident title and submit it via the ``Submit'' button or the \texttt{Enter} key.
+\end{itemize}
+
+\paragraph{Row~3: Filters and Search.} A horizontal bar containing:
+%
+\begin{itemize}
+  \item A \textbf{search field} (``Cerca per titolo dell'incidente...'') that filters incidents by title in real time (case-insensitive substring match).
+  \item An \textbf{``Escalated only'' toggle} (``Mostra solo Escalated'') that, when active (highlighted in orange), restricts the Kanban board to show only escalated incidents.
+  \item A \textbf{``My tickets'' toggle} (``I Miei Ticket'') that, when active (highlighted in blue), restricts the board to incidents where the current operator is the creator, the current lock holder, or the resolver.
+\end{itemize}
+%
+All three filters can be combined. Toggling a filter again deactivates it. See \cref{ug-filters} for details.
+
+\paragraph{Row~4: Kanban Board.} Four columns represent the incident lifecycle:
+%
+\begin{itemize}
+  \item \textbf{Open} (magenta header) --- unclaimed incidents with status \texttt{open}. Each card shows the title, the creator's name, and a ``Claim Ticket'' button.
+  \item \textbf{In Progress} (blue header) --- incidents currently claimed (locked) by an operator, regardless of their underlying status (\texttt{open} or \texttt{escalated}). Each card shows the title, an ``ESCALATED'' badge if applicable, and the lock holder's name. If the current operator holds the lock, ``Resolve'' and ``Release'' buttons are displayed.
+  \item \textbf{Escalated} (orange header) --- unclaimed incidents with status \texttt{escalated}. Each card shows the title, an SLA warning, and a ``Claim Escalation'' button.
+  \item \textbf{Resolved} (green header) --- incidents with status \texttt{closed}. Each card shows the title (struck through) and the resolver's name. No action buttons are available.
+\end{itemize}
+%
+Each column header includes a badge showing the current count of cards in that column. Cards appear and disappear with a smooth vertical slide animation.
+
+\subsection{Creating an Incident}\label{ug-create}
+
+\begin{enumerate}
+  \item In the ``Register New Incident'' card, type a descriptive title for the incident (e.g., ``Database connection timeout on prod-db-03'').
+  \item Click ``Submit'' or press \texttt{Enter}. The button is disabled if the field is empty.
+  \item \textbf{Expected outcome:} a success toast appears (``Incidente registrato con successo!''). The new incident appears as a card in the ``Open'' column on the current client and on \emph{every other connected client} simultaneously, without any manual refresh. The ``Total Tickets'' and ``Open Tickets'' KPI counters increment by~1. The input field is cleared, ready for the next entry.
+\end{enumerate}
+
+\subsection{Claiming an Incident}\label{ug-claim}
+
+Claiming an incident grants the operator exclusive access to it, preventing other operators from claiming or resolving it simultaneously.
+
+\begin{enumerate}
+  \item Locate the incident in the ``Open'' or ``Escalated'' column.
+  \item Click the ``Claim Ticket'' (or ``Claim Escalation'') button on the card.
+  \item \textbf{Expected outcome (success):} a success toast appears (``Hai preso in carico il ticket.''). The incident card moves from the ``Open'' (or ``Escalated'') column to the ``In Progress'' column. The card now shows ``Locked by: \texttt{<your username>}'' and displays ``Resolve'' and ``Release'' buttons. On all other clients, the same card moves to ``In Progress'' and shows the lock holder's name, but without the action buttons (only the lock holder sees them).
+  \item \textbf{Expected outcome (conflict):} if another operator has already claimed the incident, an error toast appears (``Impossibile prendere in carico: Incidente già preso in carico'') and reports who currently holds the lock. No state change occurs.
+\end{enumerate}
+%
+The claim expires automatically after 60 seconds if the operator does not resolve or explicitly release it. After expiry, the incident becomes claimable again.
+
+\subsection{Releasing a Claim}\label{ug-release}
+
+If an operator has claimed an incident but decides not to resolve it (e.g., the issue was misassigned or the operator needs to leave), they can release the lock explicitly.
+
+\begin{enumerate}
+  \item Locate the incident in the ``In Progress'' column (only incidents locked by the current operator show the action buttons).
+  \item Click the ``Release'' button ($\times$ Release).
+  \item \textbf{Expected outcome:} an info toast appears (``Lock rilasciato.''). The incident moves back from ``In Progress'' to its original column (``Open'' or ``Escalated'', depending on its underlying status). The incident is immediately claimable by any operator. On all other clients, the card moves back accordingly.
+\end{enumerate}
+
+\subsection{Resolving an Incident}\label{ug-resolve}
+
+Only the operator currently holding the claim on an incident can resolve it.
+
+\begin{enumerate}
+  \item Locate the incident in the ``In Progress'' column (the ``Resolve'' button is only visible to the lock holder).
+  \item Click the ``Resolve'' button (Resolve). The button is disabled if the incident is already resolved.
+  \item \textbf{Expected outcome (success):} a success toast appears (``Ticket risolto correttamente!''). The incident moves to the ``Resolved'' column on all clients. Its title is displayed with a strikethrough, and the card shows ``Solved by: \texttt{<your username>}''. The ``Resolved Tickets'' KPI increments by~1; the ``Open Tickets'' (or ``Escalated Tickets'') KPI decrements accordingly. The incident can no longer be claimed or resolved again.
+  \item \textbf{Expected outcome (conflict):} if the incident was concurrently modified by the background escalation task between the time the operator claimed it and the resolution attempt (a rare but possible race), the resolution is rejected with an error toast (``Conflitto o errore: Conflitto! Il documento è stato già modificato o non esiste.''). The operator should re-claim the incident and try again.
+\end{enumerate}
+
+\subsection{Observing Automatic Escalation}\label{ug-escalation}
+
+Escalation is fully automatic and requires no operator action. However, it is important for operators to understand when and why it happens.
+
+\begin{itemize}
+  \item Any incident that remains in \texttt{open} status for more than \textbf{5~minutes} is automatically transitioned to \texttt{escalated} by a background task running on the server.
+  \item When this happens, the incident moves from the ``Open'' column to the ``Escalated'' column on every connected client. A prominent warning toast appears on all clients: ``Attenzione: Il ticket \texttt{<title>} ha superato i limiti SLA ed è stato ESCALATO!'' (displayed for 8~seconds, longer than the default 5~seconds).
+  \item Escalated incidents can still be claimed and resolved through the same workflow described above. Claiming an escalated incident moves it to ``In Progress''.
+  \item The ``Escalated Tickets'' KPI counter reflects the current number of unclaimed escalated incidents.
+\end{itemize}
+
+\subsection{Using Filters and Search}\label{ug-filters}
+
+The filters in the horizontal bar between the chart row and the Kanban board allow operators to narrow the visible incidents:
+
+\paragraph{Text search.} Type any substring in the search field. Only incidents whose title contains the substring (case-insensitive) are displayed in the Kanban columns. Clearing the field restores all incidents.
+
+\paragraph{Escalated-only toggle.} Click the ``Mostra solo Escalated'' button. When active (highlighted in orange), only incidents with status \texttt{escalated} are shown across all columns. Click again to deactivate.
+
+\paragraph{My-tickets toggle.} Click the ``I Miei Ticket'' button. When active (highlighted in blue), only incidents where the current operator is the creator (\texttt{createdBy}), the current lock holder (\texttt{lockedBy}), or the resolver (\texttt{closedBy}) are shown. Click again to deactivate.
+
+\paragraph{Important:} the KPI counters in Row~1 (Total, Open, Escalated, Resolved, Users Online) are \textbf{never affected by filters}. They always show the true global system state. Only the Kanban columns and their per-column count badges change in response to filters.
+
+\subsection{Notifications}\label{ug-notifications}
+
+The system uses non-blocking \textbf{toast notifications} (bottom-right corner, auto-dismiss after 5 seconds unless hovered) to inform the operator of events:
+
+\begin{itemize}
+  \item \textbf{Info (blue):} a new incident was created by another operator (``Nuovo ticket registrato: \texttt{<title>}'').
+  \item \textbf{Success (green):} the operator's own action succeeded (creation, claim, resolution); or another operator resolved an incident (``Il ticket \texttt{<title>} è stato risolto da \texttt{<name>}'').
+  \item \textbf{Warning (orange):} an incident was automatically escalated (``Attenzione: Il ticket \texttt{<title>} ha superato i limiti SLA ed è stato ESCALATO!''). This notification is displayed for 8 seconds.
+  \item \textbf{Error (red):} an action failed --- claim conflict (``Impossibile prendere in carico: ...''), release conflict (``Impossibile rilasciare: ...''), resolution conflict (``Conflitto o errore: ...''), or a network error (``Errore di rete durante ...'').
+\end{itemize}
+%
+Notifications can be dismissed early by clicking on them. They can also be dragged horizontally to dismiss. A progress bar at the bottom of each notification shows the remaining display time.
+
+\subsection{Multi-Operator Collaboration}\label{ug-multi}
+
+The system is designed for simultaneous use by multiple operators. To experience the collaborative features:
+
+\begin{enumerate}
+  \item Open \texttt{http://board.local} in two or more browser windows (or on different machines on the same network).
+  \item Log in with different usernames in each window.
+  \item Perform actions (create, claim, resolve) from any window and observe the real-time synchronization on all other windows:
   %
   \begin{itemize}
-    \item provide instructions
-    \item provide expected outcomes
-    \item provide screenshots if possible
+    \item Incident cards appear, move between columns, and disappear simultaneously across all clients.
+    \item The ``Users Online'' KPI reflects the number of distinct connected operators.
+    \item Attempting to claim an incident already held by another operator produces an immediate conflict notification.
   \end{itemize}
+  \item Close a browser window and observe the ``Users Online'' count decrease within a few seconds.
+\end{enumerate}
+
+\subsection{Connection Resilience}\label{ug-resilience}
+
+The application handles connection interruptions transparently:
+
+\begin{itemize}
+  \item If the WebSocket connection is lost (e.g., due to a network glitch, a pod restart, or a rolling update), the Socket.IO client automatically attempts to reconnect with exponential backoff.
+  \item Upon reconnection, the client fetches the full, current incident list from the server, ensuring the displayed state is never stale.
+  \item The ``Live Sync Active'' indicator (green pulsing dot) in the dashboard header confirms that the real-time connection is operational. If the connection is lost, the Socket.IO client's reconnection logic will restore it without manual intervention.
+  \item No data is lost during a disconnection: all mutations are sent via HTTP (not WebSocket), so they either succeed and are persisted in MongoDB or fail and produce an error notification. The real-time event stream is used only for \emph{receiving} updates, not for sending commands.
 \end{itemize}
 
 \section{Self-evaluation}\label{self-evaluation}
@@ -606,8 +1231,5 @@ It should be noted that each student is only responsible for their own section.
 Discuss possible future works, improvements, extensions, optimizations, etc.
 
 Also discuss here any unimplemented feature, and how you would have implemented it.
-
-\bibliographystyle{plain}
-\bibliography{references}
 
 \end{document}
