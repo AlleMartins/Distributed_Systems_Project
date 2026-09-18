@@ -3,14 +3,27 @@ const http = require('http');
 const { Server } = require('socket.io');
 const { createClient } = require('redis');
 const { createAdapter } = require('@socket.io/redis-adapter');
-const { MongoClient, ObjectId } = require('mongodb'); 
+const { MongoClient, ObjectId } = require('mongodb');
 const cors = require('cors');
 const os = require('os'); // AGGIUNTO: Necessario per recuperare l'ID del pod
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const port = process.env.PORT || 3000;
 const mongoUrl = process.env.MONGO_URL || 'mongodb://localhost:27017/app?replicaSet=rs0';
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 const podId = os.hostname(); // AGGIUNTO: Identificativo univoco del container (es. api-7685fc6bd-4wv68)
+
+// Secret condiviso da TUTTE le repliche dell'API (via k8s Secret): è ciò
+// che rende l'autenticazione stateless in un cluster orizzontalmente
+// scalato. Qualunque pod verifica un token emesso da un pod qualsiasi
+// altro, senza bisogno di session affinity o storage di sessione condiviso.
+const jwtSecret = process.env.JWT_SECRET || 'dev-secret-do-not-use-in-production';
+if (!process.env.JWT_SECRET) {
+  console.warn(`[${podId}] ATTENZIONE: JWT_SECRET non impostato, uso un secret di sviluppo. Non usare in produzione.`);
+}
+const JWT_EXPIRES_IN = '12h';
+const BCRYPT_SALT_ROUNDS = 10;
 
 // Script Lua per il rinnovo ATOMICO del lock di leadership.
 // GET+PEXPIRE separati non sono atomici: nella finestra tra i due comandi
@@ -65,22 +78,101 @@ async function startServer() {
     db = mongoClient.db('app');
     console.log(`[${podId}] MongoDB connesso al Replica Set.`);
 
+    // Indice unico: garantisce l'unicità dello username anche in presenza
+    // di più repliche API che ricevono registrazioni concorrenti (l'unicità
+    // applicativa da sola avrebbe una finestra di race condition).
+    await db.collection('users').createIndex({ username: 1 }, { unique: true });
+
     const apiRouter = express.Router();
-    
+
+    // --- MIDDLEWARE DI AUTENTICAZIONE (JWT stateless) ---
+    // Nessuno stato di sessione da mantenere: il token porta con sé tutto
+    // il necessario per essere verificato da un pod QUALSIASI, il che è
+    // essenziale dato che le richieste di un utente possono atterrare su
+    // repliche diverse ad ogni chiamata (nessuna sticky session lato API).
+    function authenticate(req, res, next) {
+      const authHeader = req.headers.authorization || '';
+      const [scheme, token] = authHeader.split(' ');
+      if (scheme !== 'Bearer' || !token) {
+        return res.status(401).json({ error: 'Token di autenticazione mancante' });
+      }
+      try {
+        const payload = jwt.verify(token, jwtSecret);
+        req.user = { username: payload.sub };
+        next();
+      } catch (err) {
+        return res.status(401).json({ error: 'Token non valido o scaduto' });
+      }
+    }
+
+    // --- ROTTE DI AUTENTICAZIONE ---
+    apiRouter.post('/auth/register', async (req, res) => {
+      try {
+        const { username, password } = req.body;
+        if (!username || typeof username !== 'string' || !username.trim()) {
+          return res.status(400).json({ error: 'Username mancante' });
+        }
+        if (!password || typeof password !== 'string' || password.length < 8) {
+          return res.status(400).json({ error: 'La password deve avere almeno 8 caratteri' });
+        }
+
+        const normalizedUsername = username.trim();
+        const passwordHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
+
+        try {
+          await db.collection('users').insertOne({
+            username: normalizedUsername,
+            passwordHash,
+            createdAt: new Date()
+          });
+        } catch (err) {
+          if (err.code === 11000) {
+            return res.status(409).json({ error: 'Username già in uso' });
+          }
+          throw err;
+        }
+
+        res.status(201).json({ success: true });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    apiRouter.post('/auth/login', async (req, res) => {
+      try {
+        const { username, password } = req.body;
+        if (!username || !password) {
+          return res.status(400).json({ error: 'Username e password sono obbligatori' });
+        }
+
+        const user = await db.collection('users').findOne({ username: username.trim() });
+        // Stesso messaggio di errore sia per utente inesistente sia per
+        // password errata: evita di rivelare quali username sono registrati.
+        if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+          return res.status(401).json({ error: 'Credenziali non valide' });
+        }
+
+        const token = jwt.sign({ sub: user.username }, jwtSecret, { expiresIn: JWT_EXPIRES_IN });
+        res.status(200).json({ token, username: user.username });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
     // --- ROTTE CRUD BASE ---
-    apiRouter.post('/incidents', async (req, res) => {
-      const { title, status, createdBy } = req.body;
-      const result = await db.collection('incidents').insertOne({ 
-        title, 
-        status: status || 'open', 
-        createdBy: createdBy || 'Anonimo',
-        version: 1, 
-        updatedAt: new Date() 
+    apiRouter.post('/incidents', authenticate, async (req, res) => {
+      const { title, status } = req.body;
+      const result = await db.collection('incidents').insertOne({
+        title,
+        status: status || 'open',
+        createdBy: req.user.username,
+        version: 1,
+        updatedAt: new Date()
       });
       res.status(201).json({ success: true, id: result.insertedId });
     });
 
-    apiRouter.get('/incidents', async (req, res) => {
+    apiRouter.get('/incidents', authenticate, async (req, res) => {
       try {
         const allIncidents = await db.collection('incidents').find({}).sort({ updatedAt: -1 }).toArray();
         res.status(200).json(allIncidents);
@@ -91,10 +183,10 @@ async function startServer() {
 
     // --- A) DISTRIBUTED LOCK / CLAIM (MUTUA ESCLUSIONE) ---
     // Permette a un operatore di "bloccare" l'incidente per 60 secondi
-    apiRouter.post('/incidents/:id/claim', async (req, res) => {
+    apiRouter.post('/incidents/:id/claim', authenticate, async (req, res) => {
       try {
         const { id } = req.params;
-        const { username } = req.body;
+        const username = req.user.username;
         const lockKey = `lock:incident:${id}`;
         
         // SET NX (Not eXists) con PX (scadenza in ms) -> 60 secondi
@@ -121,14 +213,10 @@ async function startServer() {
     // il lock solo se appartiene ancora a chi lo sta rilasciando, così un
     // analista non può liberare per errore (o per dispetto) il lock preso
     // nel frattempo da un collega.
-    apiRouter.delete('/incidents/:id/claim', async (req, res) => {
+    apiRouter.delete('/incidents/:id/claim', authenticate, async (req, res) => {
       try {
         const { id } = req.params;
-        const { username } = req.body;
-        if (!username) {
-          return res.status(400).json({ error: 'username mancante' });
-        }
-
+        const username = req.user.username;
         const lockKey = `lock:incident:${id}`;
         const released = await pubClient.eval(RELEASE_LOCK_SCRIPT, {
           keys: [lockKey],
@@ -151,10 +239,14 @@ async function startServer() {
     });
 
     // --- ROTTA PATCH (Risoluzione con Optimistic Locking + Rilascio Mutex) ---
-    apiRouter.patch('/incidents/:id', async (req, res) => {
+    apiRouter.patch('/incidents/:id', authenticate, async (req, res) => {
       try {
         const { id } = req.params;
-        const { status, version, closedBy } = req.body; 
+        const { status, version } = req.body;
+        // closedBy non è più letto dal body: prima un client poteva chiudere
+        // un ticket "a nome" di chiunque. Ora è sempre l'identità verificata
+        // dal token di chi effettua la richiesta.
+        const closedBy = status === 'closed' ? req.user.username : undefined;
         const lockKey = `lock:incident:${id}`;
 
         // Verifica server-side del lock: prima il claim era solo "advisory"
@@ -164,7 +256,7 @@ async function startServer() {
         // bloccato da QUALCUN ALTRO rispetto a chi sta chiudendo, blocchiamo
         // la richiesta qui, indipendentemente da cosa mostra il frontend.
         const currentOwner = await pubClient.get(lockKey);
-        if (currentOwner && currentOwner !== closedBy) {
+        if (currentOwner && currentOwner !== req.user.username) {
           return res.status(409).json({
             error: 'Incidente bloccato da un altro utente',
             lockedBy: currentOwner
@@ -246,13 +338,27 @@ async function startServer() {
     // Socket.IO rileva le connessioni morte tramite il proprio protocollo
     // di heartbeat (ping/pong su engine.io), indipendentemente da un
     // 'disconnect' pulito, quindi il conteggio si autocorregge da solo.
-    io.on('connection', async (socket) => {
-      const username = socket.handshake.auth.username || 'Anonimo';
-      // Salviamo lo username sui dati del socket: fetchSockets() lo
-      // restituisce anche per i socket connessi ad ALTRI pod, perché
-      // l'adapter Redis sincronizza socket.data cluster-wide.
-      socket.data.username = username;
+    // Middleware di autenticazione sull'handshake: prima lo username veniva
+    // preso a occhi chiusi da socket.handshake.auth.username, cioè
+    // qualunque client poteva connettersi dichiarando l'identità di un
+    // altro utente. Ora l'handshake viene accettato solo con un JWT valido,
+    // verificabile da QUALSIASI pod (nessuno stato di sessione condiviso
+    // necessario oltre al secret comune).
+    io.use((socket, next) => {
+      const token = socket.handshake.auth && socket.handshake.auth.token;
+      if (!token) {
+        return next(new Error('unauthorized'));
+      }
+      try {
+        const payload = jwt.verify(token, jwtSecret);
+        socket.data.username = payload.sub;
+        next();
+      } catch (err) {
+        next(new Error('unauthorized'));
+      }
+    });
 
+    io.on('connection', async (socket) => {
       const broadcastActiveUsers = async () => {
         const sockets = await io.fetchSockets();
         const uniqueUsers = [...new Set(sockets.map(s => s.data.username))];

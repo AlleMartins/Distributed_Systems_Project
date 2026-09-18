@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.28)  5 AUG 2026 16:06
+This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.28)  7 AUG 2026 16:21
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -322,206 +322,228 @@ LaTeX Font Info:    External font `cmex10' loaded for size
 (Font)              <14.4> on input line 25.
 LaTeX Font Info:    External font `cmex10' loaded for size
 (Font)              <7> on input line 25.
+ [1
 
 
-Package natbib Warning: Citation `adams1995hitchhiker' on page 1 undefined on input line 40.
+{/usr/local/texlive/2026/texmf-var/fonts/map/pdftex/updmap/pdftex.map}] [2{/usr/local/texlive/2026/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc}] [3] [4]
+Overfull \hbox (1.72305pt too wide) in paragraph at lines 165--167
+[]\OT1/cmr/bx/n/10.95 Board ac-cess. \OT1/cmr/m/n/10.95 An op-er-a-tor can join the board by reg-is-ter-ing a user-name/password
+ []
 
+[5]
 LaTeX Font Info:    External font `cmex10' loaded for size
-(Font)              <10.95> on input line 45.
+(Font)              <10.95> on input line 184.
 LaTeX Font Info:    External font `cmex10' loaded for size
-(Font)              <8> on input line 45.
+(Font)              <8> on input line 184.
 LaTeX Font Info:    External font `cmex10' loaded for size
-(Font)              <6> on input line 45.
-[1
+(Font)              <6> on input line 184.
+ [6] [7] [8] [9]
+Overfull \hbox (9.87988pt too wide) in paragraph at lines 277--278
+\OT1/cmr/m/n/10.95 mary fo-cus on dis-tributed co-or-di-na-tion. Op-er-a-tors au-then-ti-cate with a user-name/password
+ []
 
+[10] [11] [12]
+<figures/Architettura_sistema.png, id=103, 2794.44pt x 1541.76pt>
+File: figures/Architettura_sistema.png Graphic file (type png)
+<use figures/Architettura_sistema.png>
+Package pdftex.def Info: figures/Architettura_sistema.png  used on input line 329.
+(pdftex.def)             Requested size: 418.25555pt x 230.75998pt.
 
-{/usr/local/texlive/2026/texmf-var/fonts/map/pdftex/updmap/pdftex.map}]
-<figures/universe.jpg, id=18, 102.3825pt x 73.9563pt>
-File: figures/universe.jpg Graphic file (type jpg)
-<use figures/universe.jpg>
-Package pdftex.def Info: figures/universe.jpg  used on input line 58.
-(pdftex.def)             Requested size: 209.12778pt x 151.07419pt.
-LaTeX Font Info:    Trying to load font information for OMS+cmtt on input line 69.
-LaTeX Font Info:    No file OMScmtt.fd. on input line 69.
-
-
-LaTeX Font Warning: Font shape `OMS/cmtt/m/n' undefined
-(Font)              using `OMS/cmsy/m/n' instead
-(Font)              for symbol `textbackslash' on input line 69.
-
-[2{/usr/local/texlive/2026/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc} <./figures/universe.jpg>] [3] [4] [5] [6] [7] [8] [9] [10] [11] [12]
-Overfull \hbox (8.85701pt too wide) in paragraph at lines 374--375
+Overfull \hbox (8.85701pt too wide) in paragraph at lines 340--341
 []\OT1/cmr/m/n/10.95 The Mon-goDB Replica Set uses a \OT1/cmr/m/it/10.95 head-less \OT1/cmr/m/n/10.95 Ser-vice (\OT1/cmtt/m/n/10.95 mongo.app.svc.cluster.local\OT1/cmr/m/n/10.95 )
  []
 
 
-Overfull \hbox (46.02129pt too wide) in paragraph at lines 374--375
+Overfull \hbox (46.02129pt too wide) in paragraph at lines 340--341
 \OT1/cmr/m/n/10.95 paired with the \OT1/cmtt/m/n/10.95 StatefulSet\OT1/cmr/m/n/10.95 's sta-ble per-pod DNS names (\OT1/cmtt/m/n/10.95 mongo-0.mongo\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 mongo-1.mongo\OT1/cmr/m/n/10.95 ,
  []
 
 
-Overfull \hbox (0.9466pt too wide) in paragraph at lines 374--375
+Overfull \hbox (0.9466pt too wide) in paragraph at lines 340--341
 \OT1/cmtt/m/n/10.95 mongo-2.mongo\OT1/cmr/m/n/10.95 ), since replica-set mem-bers must be in-di-vid-u-ally ad-dress-able rather
  []
 
-[13]
-Overfull \hbox (79.05678pt too wide) in paragraph at lines 380--381
- \OT1/cmss/bx/n/10.95 Do-main en-ti-ties.[] \OT1/cmr/m/n/10.95 The core do-main en-tity is the \OT1/cmr/bx/n/10.95 In-ci-dent \OT1/cmr/m/n/10.95 (\OT1/cmtt/m/n/10.95 title\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 status $\OMS/cmtt/m/n/10.95 2 f[]\OML/cmm/m/it/10.95 ; []; []\OMS/cmtt/m/n/10.95 g$\OT1/cmr/m/n/10.95 ,
+[13 <./figures/Architettura_sistema.png>]
+Overfull \hbox (79.05678pt too wide) in paragraph at lines 346--347
+ \OT1/cmss/bx/n/10.95 Do-main en-ti-ties.[] \OT1/cmr/m/n/10.95 The core do-main en-tity is the \OT1/cmr/bx/n/10.95 In-ci-dent \OT1/cmr/m/n/10.95 (\OT1/cmtt/m/n/10.95 title\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 status $\OMS/cmsy/m/n/10.95 2 f[]\OML/cmm/m/it/10.95 ; []; []\OMS/cmsy/m/n/10.95 g$\OT1/cmr/m/n/10.95 ,
  []
 
 
-Overfull \hbox (22.40472pt too wide) in paragraph at lines 387--388
+Overfull \hbox (22.40472pt too wide) in paragraph at lines 353--354
 []\OT1/cmr/m/n/10.95 The \OT1/cmr/bx/n/10.95 Op-er-a-tor\OT1/cmr/m/n/10.95 's iden-tity is not per-sisted at all: it ex-ists only as \OT1/cmtt/m/n/10.95 socket.data.username
  []
 
 
-Overfull \hbox (46.09091pt too wide) in paragraph at lines 390--391
+Overfull \hbox (46.09091pt too wide) in paragraph at lines 356--357
  \OT1/cmss/bx/n/10.95 Do-main events.[] \OT1/cmtt/m/n/10.95 IncidentCreated\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 IncidentClaimed\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 IncidentReleased\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 IncidentResolved\OT1/cmr/m/n/10.95 ,
  []
 
 
-Overfull \hbox (13.17113pt too wide) in paragraph at lines 392--393
+Overfull \hbox (13.17113pt too wide) in paragraph at lines 358--359
 \OT1/cmr/m/n/10.95 server, over REST: \OT1/cmtt/m/n/10.95 POST /incidents\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 POST\OT1/cmr/m/n/10.95 /\OT1/cmtt/m/n/10.95 DELETE .../claim\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 PATCH /incidents/:id\OT1/cmr/m/n/10.95 ),
  []
 
 
-Overfull \hbox (57.89322pt too wide) in paragraph at lines 392--393
-\OMS/cmtt/m/n/10.95 !$ \OT1/cmr/m/n/10.95 client, over Socket.IO: \OT1/cmtt/m/n/10.95 incident[]update\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 incident[]locked\OT1/cmr/m/n/10.95 /\OT1/cmtt/m/n/10.95 incident[]unlocked\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 users[]update\OT1/cmr/m/n/10.95 ),
+Overfull \hbox (57.89322pt too wide) in paragraph at lines 358--359
+\OMS/cmsy/m/n/10.95 !$ \OT1/cmr/m/n/10.95 client, over Socket.IO: \OT1/cmtt/m/n/10.95 incident[]update\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 incident[]locked\OT1/cmr/m/n/10.95 /\OT1/cmtt/m/n/10.95 incident[]unlocked\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 users[]update\OT1/cmr/m/n/10.95 ),
  []
 
 [14]
 LaTeX Font Info:    Font shape `OT1/cmtt/bx/n' in size <10.95> not available
-(Font)              Font shape `OT1/cmtt/m/n' tried instead on input line 415.
+(Font)              Font shape `OT1/cmtt/m/n' tried instead on input line 381.
  [15] [16] [17] [18] [19]
-Overfull \hbox (3.22739pt too wide) in paragraph at lines 488--489
+Overfull \hbox (3.22739pt too wide) in paragraph at lines 454--455
 \OT1/cmr/m/n/10.95 HTTP was cho-sen be-cause ev-ery mu-ta-tion re-quires an un-am-bigu-ous, syn-chronous success-
  []
 
 [20]
-Overfull \hbox (77.92068pt too wide) in paragraph at lines 502--503
+Overfull \hbox (77.92068pt too wide) in paragraph at lines 468--469
 \OT1/cmr/m/n/10.95 npm driver (v7). The con-nec-tion string enu-mer-ates all three replica-set mem-bers (\OT1/cmtt/m/n/10.95 mongo-0.mongo:27017\OT1/cmr/m/n/10.95 ,
  []
 
+LaTeX Font Info:    Trying to load font information for OMS+cmtt on input line 475.
+LaTeX Font Info:    No file OMScmtt.fd. on input line 475.
 
-Overfull \hbox (1.74922pt too wide) in paragraph at lines 509--510
+LaTeX Font Warning: Font shape `OMS/cmtt/m/n' undefined
+(Font)              using `OMS/cmsy/m/n' instead
+(Font)              for symbol `textbraceleft' on input line 475.
+
+
+Overfull \hbox (1.74922pt too wide) in paragraph at lines 475--476
 []\OT1/cmr/bx/n/10.95 REST API: \OT1/cmr/m/n/10.95 both re-quest bod-ies (e.g., \OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/10.95 "title": "...", "status": "open",
  []
 
 
-Overfull \hbox (20.70775pt too wide) in paragraph at lines 510--511
+Overfull \hbox (20.70775pt too wide) in paragraph at lines 476--477
 []\OT1/cmr/bx/n/10.95 Socket.IO events: \OT1/cmr/m/n/10.95 each emit-ted event car-ries a JSON pay-load. For \OT1/cmtt/m/n/10.95 incident[]update\OT1/cmr/m/n/10.95 ,
  []
 
 [21]
-Overfull \hbox (4.8109pt too wide) in paragraph at lines 525--526
+Overfull \hbox (4.8109pt too wide) in paragraph at lines 491--492
 []\OT1/cmtt/m/n/10.95 updateOne(\OMS/cmtt/m/n/10.95 f[]\OT1/cmtt/m/n/10.95 id, version\OMS/cmtt/m/n/10.95 g\OT1/cmtt/m/n/10.95 , \OMS/cmtt/m/n/10.95 f\TS1/cmtt/m/n/10.95 $\OT1/cmtt/m/n/10.95 set: ..., \TS1/cmtt/m/n/10.95 $\OT1/cmtt/m/n/10.95 inc: \OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/10.95 version: 1\OMS/cmtt/m/n/10.95 gg\OT1/cmtt/m/n/10.95 ) \OT1/cmr/m/n/10.95 for single-
  []
 
 
-Overfull \hbox (52.7223pt too wide) in paragraph at lines 529--530
+Overfull \hbox (52.7223pt too wide) in paragraph at lines 495--496
  \OT1/cmss/bx/n/10.95 Read op-er-a-tions.[] \OT1/cmr/m/n/10.95 A sin-gle read pat-tern is used: \OT1/cmtt/m/n/10.95 find(\OMS/cmtt/m/n/10.95 fg\OT1/cmtt/m/n/10.95 ).sort(\OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/10.95 updatedAt: -1\OMS/cmtt/m/n/10.95 g\OT1/cmtt/m/n/10.95 ).toArray()\OT1/cmr/m/n/10.95 ,
  []
 
-[22] [23] [24]
-Overfull \hbox (5.1889pt too wide) in paragraph at lines 604--605
+[22] [23] [24] [25]
+Overfull \hbox (5.1889pt too wide) in paragraph at lines 572--573
 []\OT1/cmr/m/n/10.95 A \OT1/cmr/bx/n/10.95 Pod-Dis-rup-tion-Bud-get \OT1/cmr/m/n/10.95 (\OT1/cmtt/m/n/10.95 minAvailable: 2\OT1/cmr/m/n/10.95 ) that pre-vents vol-un-tary evic-
  []
 
-[25]
-Overfull \hbox (10.64398pt too wide) in paragraph at lines 611--613
+[26]
+Overfull \hbox (10.64398pt too wide) in paragraph at lines 579--581
 []\OT1/cmr/bx/n/10.95 Ingress \OT1/cmr/m/n/10.95 (\OT1/cmtt/m/n/10.95 ingress.yaml\OT1/cmr/m/n/10.95 ): an Ng-inx Ingress re-source con-fig-ured for host \OT1/cmtt/m/n/10.95 board.local
  []
 
 
-Overfull \hbox (92.37756pt too wide) in paragraph at lines 619--620
+Overfull \hbox (92.37756pt too wide) in paragraph at lines 587--588
 \OT1/cmr/m/n/10.95 Cookie-based sticky ses-sions are en-abled via an-no-ta-tions (\OT1/cmtt/m/n/10.95 nginx.ingress.kubernetes.io/affinity:
  []
 
 
-Overfull \hbox (0.82507pt too wide) in paragraph at lines 619--620
+Overfull \hbox (0.82507pt too wide) in paragraph at lines 587--588
 \OT1/cmtt/m/n/10.95 cookie\OT1/cmr/m/n/10.95 , cookie name \OT1/cmtt/m/n/10.95 route\OT1/cmr/m/n/10.95 , 48-hour ex-piry) specif-i-cally be-cause Socket.IO's HTTP
  []
 
-[26]
-Overfull \hbox (80.26962pt too wide) in paragraph at lines 647--648
+[27]
+Overfull \hbox (80.26962pt too wide) in paragraph at lines 615--616
 \OT1/cmr/m/n/10.95 stream cur-sor (\OT1/cmtt/m/n/10.95 db.collection('incidents').watch([], \OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/10.95 fullDocument: 'updateLookup'\OMS/cmtt/m/n/10.95 g\OT1/cmtt/m/n/10.95 )\OT1/cmr/m/n/10.95 )
  []
 
 
-Overfull \hbox (101.59656pt too wide) in paragraph at lines 647--648
+Overfull \hbox (101.59656pt too wide) in paragraph at lines 615--616
 \OT1/cmr/m/n/10.95 and emits the change event to its own locally-connected clients via \OT1/cmtt/m/n/10.95 io.local.emit('incident[]update',
  []
 
 
-Overfull \hbox (20.03125pt too wide) in paragraph at lines 659--660
+Overfull \hbox (20.03125pt too wide) in paragraph at lines 627--628
 []\OT1/cmr/bx/n/10.95 Filtered \OT1/cmr/m/n/10.95 through a chain of \OT1/cmtt/m/n/10.95 computed \OT1/cmr/m/n/10.95 prop-er-ties (\OT1/cmtt/m/n/10.95 filteredIncidents $\OMS/cmtt/m/n/10.95 !$ \OT1/cmtt/m/n/10.95 kanbanOpen\OT1/cmr/m/n/10.95 ,
  []
 
 
-Overfull \hbox (1.03564pt too wide) in paragraph at lines 659--660
+Overfull \hbox (1.03564pt too wide) in paragraph at lines 627--628
 \OT1/cmtt/m/n/10.95 kanbanInProgress\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 kanbanEscalated\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 kanbanResolved\OT1/cmr/m/n/10.95 ) that re-act to search text,
  []
 
-[27]
-Overfull \hbox (0.79678pt too wide) in paragraph at lines 662--663
+
+Overfull \hbox (0.79678pt too wide) in paragraph at lines 630--631
 \OT1/cmr/m/n/10.95 The \OT1/cmtt/m/n/10.95 incident[]update \OT1/cmr/m/n/10.95 han-dler merges per-sis-tent state changes (from the Change Stream)
  []
 
-[28] [29]
-Overfull \hbox (38.40282pt too wide) in paragraph at lines 727--728
+[28] [29] [30]
+Overfull \hbox (38.40282pt too wide) in paragraph at lines 695--696
 []\OT1/cmr/bx/n/10.95 Expected: \OT1/cmr/m/n/10.95 ex-actly one re-quest re-turns \OT1/cmtt/m/n/10.95 200 \OT1/cmr/m/n/10.95 with \OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/10.95 "success":true, "lockedBy":"..."\OMS/cmtt/m/n/10.95 g\OT1/cmr/m/n/10.95 ;
  []
 
 
-Overfull \hbox (5.55775pt too wide) in paragraph at lines 734--735
-\OT1/cmtt/m/n/10.95 /api/incidents/<id>/claim \OT1/cmr/m/n/10.95 with \OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/10.95 "username":"alice"\OMS/cmtt/m/n/10.95 g\OT1/cmr/m/n/10.95 ). Im-me-di-ately at-tempt
+Overfull \hbox (9.24826pt too wide) in paragraph at lines 702--703
+\OT1/cmtt/m/n/10.95 /api/incidents/<id>/claim \OT1/cmr/m/n/10.95 au-then-ti-cated as al-ice, i.e., with \OT1/cmtt/m/n/10.95 -H "Authorization:
  []
 
-
-Overfull \hbox (96.17686pt too wide) in paragraph at lines 742--743
-\OT1/cmtt/m/n/10.95 /api/incidents/<id> \OT1/cmr/m/n/10.95 with \OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/10.95 "status":"closed", "version":<current>, "closedBy":"alice"\OMS/cmtt/m/n/10.95 g\OT1/cmr/m/n/10.95 ). 
+[31]
+Overfull \hbox (77.68488pt too wide) in paragraph at lines 710--711
+\OT1/cmtt/m/n/10.95 /api/incidents/<id> \OT1/cmr/m/n/10.95 au-then-ti-cated as al-ice with \OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/10.95 "status":"closed", "version":<current>\OMS/cmtt/m/n/10.95 g
  []
 
-[30] [31]
-Overfull \hbox (5.51393pt too wide) in paragraph at lines 783--784
+[32]
+Overfull \hbox (5.51393pt too wide) in paragraph at lines 751--752
 []\OT1/cmr/bx/n/10.95 Result: \OT1/cmr/m/n/10.95 par-tially passed. The \OT1/cmtt/m/n/10.95 try/catch \OT1/cmr/m/n/10.95 blocks in \OT1/cmtt/m/n/10.95 claimIncident\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 releaseClaim\OT1/cmr/m/n/10.95 ,
  []
 
-[32] [33]
-Overfull \hbox (25.56992pt too wide) in paragraph at lines 853--854
+[33] [34] [35]
+Overfull \hbox (25.56992pt too wide) in paragraph at lines 822--823
 \OT1/cmr/m/n/10.95 KPI shows 2. Force-terminate one API pod (\OT1/cmtt/m/n/10.95 kubectl delete pod <pod-serving-bob>
  []
 
 
-Overfull \hbox (11.10402pt too wide) in paragraph at lines 853--854
+Overfull \hbox (11.10402pt too wide) in paragraph at lines 822--823
 \OT1/cmtt/m/n/10.95 -n app --force --grace-period=0\OT1/cmr/m/n/10.95 ) to sim-u-late an un-clean shut-down (no \OT1/cmtt/m/n/10.95 SIGTERM\OT1/cmr/m/n/10.95 ,
  []
 
-[34] [35]
-Overfull \hbox (35.24588pt too wide) in paragraph at lines 892--893
+[36]
+Overfull \hbox (35.24588pt too wide) in paragraph at lines 861--862
 \OT1/cmr/m/n/10.95 The \OT1/cmtt/m/n/10.95 ingress \OT1/cmr/m/n/10.95 ad-don de-ploys an Ng-inx Ingress Con-troller in-side the clus-ter. The \OT1/cmtt/m/n/10.95 metrics-server
  []
 
-
-Overfull \hbox (19.20287pt too wide) in paragraph at lines 923--924
+[37]
+Overfull \hbox (19.20287pt too wide) in paragraph at lines 892--893
 \OT1/cmr/bx/n/10.95 Expected out-come: \OT1/cmr/m/n/10.95 two im-ages (\OT1/cmtt/m/n/10.95 api:latest\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 web:latest\OT1/cmr/m/n/10.95 ) are avail-able in-side Minikube's
  []
 
-[36]
-Overfull \hbox (9.25624pt too wide) in paragraph at lines 943--945
+[38]
+Overfull \hbox (9.25624pt too wide) in paragraph at lines 912--914
 []\OT1/cmr/bx/n/10.95 Expected out-come: \OT1/cmr/m/n/10.95 the three \OT1/cmtt/m/n/10.95 mongo \OT1/cmr/m/n/10.95 pods start in or-der (\OT1/cmtt/m/n/10.95 mongo-0\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 mongo-1\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 mongo-2\OT1/cmr/m/n/10.95 );
  []
 
-[37] [38]
-Overfull \hbox (28.75139pt too wide) in paragraph at lines 1029--1030
+
+Overfull \hbox (68.68295pt too wide) in paragraph at lines 933--934
+\OT1/cmtt/m/n/10.95 --namespace app --from-literal=JWT[]SECRET=\TS1/cmtt/m/n/10.95 $\OT1/cmtt/m/n/10.95 (openssl rand -base64 48) --dry-run=client
+ []
+
+[39]
+Overfull \hbox (15.30313pt too wide) in paragraph at lines 989--990
+\OT1/cmr/m/n/10.95 The \OT1/cmtt/m/n/10.95 api \OT1/cmr/m/n/10.95 pods re-ceive their con-fig-u-ra-tion via en-vi-ron-ment vari-ables de-fined in \OT1/cmtt/m/n/10.95 k8s/api.yaml\OT1/cmr/m/n/10.95 .
+ []
+
+
+Overfull \hbox (32.48708pt too wide) in paragraph at lines 989--990
+\OT1/cmr/m/n/10.95 stead in-jected from a ded-i-cated Ku-ber-netes \OT1/cmtt/m/n/10.95 Secret \OT1/cmr/m/n/10.95 (\OT1/cmtt/m/n/10.95 k8s/jwt-secret.yaml\OT1/cmr/m/n/10.95 ) via \OT1/cmtt/m/n/10.95 secretKeyRef\OT1/cmr/m/n/10.95 ,
+ []
+
+[40]
+Overfull \hbox (28.75139pt too wide) in paragraph at lines 1008--1009
 \OT1/cmr/m/n/10.95 fulSet re-ceives its con-fig-u-ra-tion via command-line ar-gu-ments (\OT1/cmtt/m/n/10.95 --replSet rs0 --bind[]ip[]all\OT1/cmr/m/n/10.95 )
  []
 
-[39] [40] [41] [42] [43] [44] [45]
+[41] [42] [43] [44] [45] [46] [47] [48]
+Overfull \hbox (33.21954pt too wide) in paragraph at lines 1245--1250
+\OT1/cmr/m/n/10.95 would need to rec-on-cile the op-ti-mistic client-side move with the same claim/release/resolve
+ []
 
-Package natbib Warning: There were undefined citations.
-
-[46] (./distributed-systems-final-report.aux)
+[49] (./distributed-systems-final-report.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-01-19>
@@ -532,18 +554,18 @@ LaTeX Font Warning: Some font shapes were not available, defaults substituted.
 
  ) 
 Here is how much of TeX's memory you used:
- 14386 strings out of 467525
- 266545 string characters out of 5418982
- 810224 words of memory out of 5000000
- 42972 multiletter control sequences out of 15000+600000
- 636172 words of font info for 67 fonts, out of 8000000 for 9000
+ 14385 strings out of 467525
+ 266505 string characters out of 5418982
+ 809224 words of memory out of 5000000
+ 42966 multiletter control sequences out of 15000+600000
+ 635878 words of font info for 66 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 108i,8n,107p,11375b,633s stack positions out of 10000i,1000n,20000p,200000b,200000s
-</usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmssbx10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt12.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/cm-super/sftt1095.pfb>
-Output written on distributed-systems-final-report.pdf (46 pages, 313665 bytes).
+ 108i,7n,107p,11375b,635s stack positions out of 10000i,1000n,20000p,200000b,200000s
+</usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmssbx10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt12.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/cm-super/sftt1095.pfb>
+Output written on distributed-systems-final-report.pdf (49 pages, 5239742 bytes).
 PDF statistics:
- 807 PDF objects out of 1000 (max. 8388607)
- 726 compressed objects within 8 object streams
- 221 named destinations out of 1000 (max. 500000)
+ 824 PDF objects out of 1000 (max. 8388607)
+ 741 compressed objects within 8 object streams
+ 226 named destinations out of 1000 (max. 500000)
  782 words of extra memory for PDF output out of 10000 (max. 10000000)
 

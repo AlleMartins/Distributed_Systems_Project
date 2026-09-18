@@ -24,6 +24,11 @@ spec:
           value: "redis://redis:6379"
         - name: CORS_ORIGIN
           value: "http://board.local"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: jwt-secret
+              key: JWT_SECRET
         ports:
         - containerPort: 3000
         resources:

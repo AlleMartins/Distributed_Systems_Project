@@ -1,16 +1,33 @@
 <template>
   <div class="app-container">
-    <!-- Schermata di Login (Dark Mode) -->
+    <!-- Schermata di Login / Registrazione (Dark Mode) -->
     <div v-if="!isJoined" class="login-wrapper">
       <div class="card login-card">
         <div class="pulse-indicator" style="margin: 0 auto 1rem auto; width: 40px; height: 40px;"></div>
-        <h2 class="text-light">Entra nella Board</h2>
-        <p class="subtitle" style="margin-bottom: 1.5rem;">Inserisci il tuo nome per accedere alla Dashboard Realtime.</p>
-        
-        <div class="input-group">
-          <input v-model="tempName" @keyup.enter="joinBoard" placeholder="Il tuo nome..." class="modern-input dark-input" autofocus />
-          <button @click="joinBoard" class="modern-btn magenta-btn" :disabled="!tempName.trim()">Connetti</button>
-        </div>
+        <h2 class="text-light">{{ authMode === 'login' ? 'Accedi alla Board' : 'Crea un account' }}</h2>
+        <p class="subtitle" style="margin-bottom: 1.5rem;">
+          {{ authMode === 'login' ? 'Inserisci username e password per accedere alla Dashboard Realtime.' : 'Registrati per poter accedere alla Dashboard Realtime.' }}
+        </p>
+
+        <form class="input-group col-input" @submit.prevent="submitAuth">
+          <input v-model="authUsername" placeholder="Username" class="modern-input dark-input" autofocus autocomplete="username" />
+          <input v-model="authPassword" type="password" placeholder="Password" class="modern-input dark-input" autocomplete="current-password" />
+          <p v-if="authError" class="auth-error">{{ authError }}</p>
+          <button type="submit" class="modern-btn magenta-btn" :disabled="!authUsername.trim() || !authPassword || authLoading">
+            {{ authMode === 'login' ? 'Accedi' : 'Registrati' }}
+          </button>
+        </form>
+
+        <p class="auth-switch">
+          <template v-if="authMode === 'login'">
+            Non hai un account?
+            <a href="#" @click.prevent="switchAuthMode('register')">Registrati</a>
+          </template>
+          <template v-else>
+            Hai già un account?
+            <a href="#" @click.prevent="switchAuthMode('login')">Accedi</a>
+          </template>
+        </p>
       </div>
     </div>
 
@@ -24,6 +41,7 @@
         <div class="header-status">
           <div class="pulse-indicator"></div>
           <span>Live Sync Active</span>
+          <button @click="logout" class="logout-btn" title="Esci">Esci</button>
         </div>
       </header>
 
@@ -190,7 +208,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { io } from 'socket.io-client';
 import { useToast } from 'vue-toastification';
 
@@ -201,10 +219,17 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
 const toast = useToast();
 const isJoined = ref(false);
-const tempName = ref('');
 const username = ref('');
+const token = ref('');
 const incidents = ref([]);
 const newTitle = ref('');
+
+// -- STATO AUTENTICAZIONE --
+const authMode = ref('login'); // 'login' | 'register'
+const authUsername = ref('');
+const authPassword = ref('');
+const authError = ref('');
+const authLoading = ref(false);
 const onlineUsers = ref([]);
 let socket = null;
 
@@ -267,13 +292,94 @@ const kanbanOpen = computed(() => filteredIncidents.value.filter(i => i.status =
 const kanbanInProgress = computed(() => filteredIncidents.value.filter(i => i.lockedBy && i.status !== 'closed'));const kanbanEscalated = computed(() => filteredIncidents.value.filter(i => i.status === 'escalated' && !i.lockedBy));
 const kanbanResolved = computed(() => filteredIncidents.value.filter(i => i.status === 'closed'));
 
-const joinBoard = async () => {
-  if (!tempName.value.trim()) return;
-  username.value = tempName.value.trim();
-  isJoined.value = true;
-  toast.success(`Benvenuto nella dashboard, ${username.value}!`);
+// Allega sempre il JWT corrente alle chiamate REST verso rotte protette.
+const authFetch = (url, options = {}) => {
+  const headers = { ...(options.headers || {}), Authorization: `Bearer ${token.value}` };
+  return fetch(url, { ...options, headers });
+};
 
-  socket = io('/', { path: '/socket.io', auth: { username: username.value } });
+const login = async () => {
+  authError.value = '';
+  authLoading.value = true;
+  try {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: authUsername.value.trim(), password: authPassword.value })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      authError.value = data.error || 'Errore durante il login';
+      return;
+    }
+
+    token.value = data.token;
+    username.value = data.username;
+    sessionStorage.setItem('authToken', data.token);
+    sessionStorage.setItem('authUsername', data.username);
+    authPassword.value = '';
+
+    isJoined.value = true;
+    toast.success(`Benvenuto nella dashboard, ${username.value}!`);
+    connectSocket();
+  } catch (err) {
+    authError.value = 'Errore di rete durante il login.';
+  } finally {
+    authLoading.value = false;
+  }
+};
+
+const register = async () => {
+  authError.value = '';
+  authLoading.value = true;
+  try {
+    const response = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: authUsername.value.trim(), password: authPassword.value })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      authError.value = data.error || 'Errore durante la registrazione';
+      authLoading.value = false;
+      return;
+    }
+    toast.success('Registrazione completata, accesso in corso...');
+    await login(); // gestisce autonomamente authLoading e la connessione
+  } catch (err) {
+    authError.value = 'Errore di rete durante la registrazione.';
+    authLoading.value = false;
+  }
+};
+
+const submitAuth = () => {
+  if (authMode.value === 'login') login();
+  else register();
+};
+
+const switchAuthMode = (mode) => {
+  authMode.value = mode;
+  authError.value = '';
+};
+
+const logout = () => {
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
+  token.value = '';
+  username.value = '';
+  incidents.value = [];
+  onlineUsers.value = [];
+  sessionStorage.removeItem('authToken');
+  sessionStorage.removeItem('authUsername');
+  authUsername.value = '';
+  authPassword.value = '';
+  isJoined.value = false;
+};
+
+const connectSocket = () => {
+  socket = io('/', { path: '/socket.io', auth: { token: token.value } });
 
   // Contatore di "generazione" della connessione: incrementato ad ogni
   // 'connect' (prima connessione + ogni reconnect automatico). Serve a
@@ -287,7 +393,8 @@ const joinBoard = async () => {
   socket.on('connect', async () => {
     const myGeneration = ++connectionGeneration;
     try {
-      const response = await fetch('/api/incidents');
+      const response = await authFetch('/api/incidents');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       // Se nel frattempo c'è stato un altro reconnect (myGeneration stale),
       // scartiamo questa risposta invece di applicarla comunque.
@@ -297,6 +404,17 @@ const joinBoard = async () => {
     } catch (err) {
       console.error("Errore durante la sincronizzazione:", err);
       toast.error("Errore di connessione al database.");
+    }
+  });
+
+  // Il token può scadere (o essere invalido dopo un riavvio con secret
+  // diverso in ambienti di sviluppo): l'handshake viene rifiutato dal
+  // middleware io.use() lato server con Error('unauthorized'). In quel
+  // caso riportiamo l'utente al login invece di ritentare all'infinito.
+  socket.on('connect_error', (err) => {
+    if (err.message === 'unauthorized') {
+      toast.error('Sessione scaduta o non valida, effettua di nuovo il login.');
+      logout();
     }
   });
 
@@ -341,10 +459,10 @@ const joinBoard = async () => {
 
 const createIncident = async () => {
   if (!newTitle.value.trim()) return;
-  await fetch('/api/incidents', {
+  await authFetch('/api/incidents', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: newTitle.value, status: 'open', createdBy: username.value })
+    body: JSON.stringify({ title: newTitle.value, status: 'open' })
   });
   toast.success("Incidente registrato con successo!");
   newTitle.value = '';
@@ -352,11 +470,7 @@ const createIncident = async () => {
 
 const claimIncident = async (inc) => {
   try {
-    const response = await fetch(`/api/incidents/${inc._id}/claim`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username.value })
-    });
+    const response = await authFetch(`/api/incidents/${inc._id}/claim`, { method: 'POST' });
     if (!response.ok) {
       let message = `HTTP ${response.status}`;
       try { const data = await response.json(); message = data.message || data.error || message; } catch {}
@@ -372,11 +486,7 @@ const claimIncident = async (inc) => {
 
 const releaseClaim = async (inc) => {
   try {
-    const response = await fetch(`/api/incidents/${inc._id}/claim`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username.value })
-    });
+    const response = await authFetch(`/api/incidents/${inc._id}/claim`, { method: 'DELETE' });
     if (!response.ok) {
       let message = `HTTP ${response.status}`;
       try { const data = await response.json(); message = data.error || message; } catch {}
@@ -392,10 +502,10 @@ const releaseClaim = async (inc) => {
 
 const resolveIncident = async (inc) => {
   try {
-    const response = await fetch(`/api/incidents/${inc._id}`, {
+    const response = await authFetch(`/api/incidents/${inc._id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'closed', version: inc.version, closedBy: username.value })
+      body: JSON.stringify({ status: 'closed', version: inc.version })
     });
     if (!response.ok) {
       let message = `HTTP ${response.status}`;
@@ -409,6 +519,17 @@ const resolveIncident = async (inc) => {
     toast.error('Errore di rete durante la risoluzione.');
   }
 };
+
+onMounted(() => {
+  const savedToken = sessionStorage.getItem('authToken');
+  const savedUsername = sessionStorage.getItem('authUsername');
+  if (savedToken && savedUsername) {
+    token.value = savedToken;
+    username.value = savedUsername;
+    isJoined.value = true;
+    connectSocket();
+  }
+});
 </script>
 
 <style scoped>
@@ -537,4 +658,11 @@ const resolveIncident = async (inc) => {
 
 .login-wrapper { display: flex; align-items: center; justify-content: center; height: 80vh; width: 100%; }
 .login-card { width: 100%; max-width: 450px; text-align: center; }
+.auth-error { color: #E94560; font-size: 0.85rem; margin: 0; text-align: left; }
+.auth-switch { margin-top: 1.25rem; font-size: 0.9rem; color: #a1a1aa; }
+.auth-switch a { color: #E94560; text-decoration: none; font-weight: 600; }
+.auth-switch a:hover { text-decoration: underline; }
+
+.logout-btn { background: none; border: 1px solid rgba(255,255,255,0.2); color: #a1a1aa; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; cursor: pointer; transition: 0.2s; }
+.logout-btn:hover { border-color: #E94560; color: #E94560; }
 </style>

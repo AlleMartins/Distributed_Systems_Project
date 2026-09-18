@@ -33,47 +33,6 @@
     The CAP theorem is addressed by choosing CP consistency for the data layer (MongoDB) while providing graceful AP degradation for coordination features (Redis), ensuring critical incident data remains consistent even during network partitions.
 \end{abstract}
 
-\section*{Quick \LaTeX{} suggestions}
-
-If you need to cite a reference, you can use the \texttt{cite} command, 
-like providing the BibTex key of some entry in the \texttt{references.bib} file, 
-e.g.: \cite{adams1995hitchhiker}.
-
-You can find pre-coocked BibTex entries for most Computer Science papers on \href{https://dblp.uni-trier.de/}{DBLP}.
-
-If you need to include an image,
-let \LaTeX{} decide where to put it by using the \texttt{figure} environment,
-with a \texttt{includegraphics} command inside it.
-%
-If your need to reference a figure,
-use the \texttt{label} command to assign a label to the figure,
-and then use the \texttt{cref} command to reference it.
-%
-Put figures in the \texttt{figures} folder.
-%
-A complete example is shown in \cref{fig:universe}.
-
-\begin{figure}
-    \centering
-    \includegraphics[width=0.5\textwidth]{figures/universe.jpg}
-    \caption{This is an example image}
-    \label{fig:universe}
-\end{figure}
-
-Do \textbf{not} put any placement constraint on figures,
-such as \texttt{[h]} or \texttt{[h!]}.
-%
-Same considerations apply for other floating elements 
-(e.g. tables, algorithms, listings, etc.).
-
-Do \textbf{not} use the \texttt{\textbackslash\textbackslash} or \texttt{\textbackslash newline} commands to break lines.
-
-Just leave an empty line between two paragraphs to start a new one.
-%
-The new line will be automatically indented.
-%
-This is intended: it is the \LaTeX{} way to separate capoverses.
-
 \section{Concept}\label{concept}
 
 \subsection{Product Type}
@@ -117,12 +76,12 @@ The background escalation task runs every 10 seconds, making the system inherent
 
 \subsubsection{How they interact and which devices}
 
-Users interact through a \textbf{desktop web browser} (the responsive design supports any modern browser).
+Users interact through a \textbf{desktop web browser} (any modern browser is supported).
 The interaction model is:
 %
 \begin{itemize}
-    \item \textbf{Login phase:} the operator enters their username to join the board
-    \item \textbf{Dashboard phase:} a Kanban board displays four columns (Open, In Progress, Escalated, Resolved) with draggable cards
+    \item \textbf{Login phase:} the operator registers or logs in with a username and password to join the board
+    \item \textbf{Dashboard phase:} a Kanban board displays four columns (Open, In Progress, Escalated, Resolved); cards move between columns automatically as their underlying status or lock state changes
     \item \textbf{Actions:} buttons for claiming, releasing, and resolving tickets; a search bar for filtering; toggle buttons for viewing only escalated or personal tickets
     \item \textbf{Notifications:} toast notifications alert the operator of events (new tickets, escalations, resolutions by others)
 \end{itemize}
@@ -203,8 +162,8 @@ This chapter defines \emph{what} the system must do (functional requirements), t
 \subsection{Functional Requirements}\label{functional-requirements}
 
 \begin{itemize}
-  \item[\textbf{1}] \textbf{Board access.} An operator can join the board by choosing a username, without prior registration or authentication. \\
-  \emph{Acceptance criterion:} submitting a non-empty username transitions the client from the login screen to the dashboard and establishes a persistent WebSocket connection.
+  \item[\textbf{1}] \textbf{Board access.} An operator can join the board by registering a username/password pair and, on subsequent visits, logging in with those credentials. \\
+  \emph{Acceptance criterion:} submitting valid credentials on the login form transitions the client from the login screen to the dashboard and establishes a persistent, authenticated WebSocket connection; submitting invalid credentials is rejected with an error and no connection is established.
 
   \item[\textbf{2}] \textbf{Incident creation.} An operator can create a new incident by providing a title; the system assigns it a default status of \texttt{open}, a creation timestamp, and the creator's identity. \\
   \emph{Acceptance criterion:} a valid \texttt{POST /api/incidents} request returns \texttt{201} and the new incident appears as a card in the ``Open'' column of every connected client without any client issuing a manual refresh.
@@ -315,7 +274,7 @@ Scalability is \textbf{relevant} for the stateless API tier and \textbf{explicit
 
 \subsubsection{Security, Trust}
 
-Security is \textbf{deliberately minimized} in the current iteration, in favor of the project's primary focus on distributed coordination. There is no authentication: any operator can join the board with an arbitrary, unverified username, and there is a single implicit role with no differentiated permissions. No transport encryption is configured between internal components (API, MongoDB, Redis all communicate over the cluster-internal network without TLS), and no data is encrypted at rest. These omissions are acceptable for the current scope---the system is not intended to handle sensitive data beyond incident titles and operator names---but are explicitly flagged as a direction for future work (\cref{future-works}) rather than an oversight not considered during analysis.
+Security is \textbf{deliberately minimized} in the current iteration, in favor of the project's primary focus on distributed coordination. Operators authenticate with a username/password pair verified server-side (bcrypt-hashed credentials, stateless JWT session), but there is still a single implicit role with no differentiated permissions once authenticated. No transport encryption is configured between internal components (API, MongoDB, Redis all communicate over the cluster-internal network without TLS), and no data is encrypted at rest. These omissions are acceptable for the current scope---the system is not intended to handle sensitive data beyond incident titles and operator names---but are explicitly flagged as a direction for future work (\cref{future-works}) rather than an oversight not considered during analysis.
 
 \subsubsection{Resource Sharing}
 
@@ -364,7 +323,14 @@ The infrastructure is composed of the following components, all containerized an
   \item \textbf{Batch job:} a one-shot Kubernetes \texttt{Job} that initializes the MongoDB Replica Set exactly once, decoupled from the StatefulSet's own lifecycle.
 \end{itemize}
 %
- 
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{figures/Architettura_sistema.png}
+  \caption{System architecture: request routing through the Ingress, the stateless \texttt{web} and \texttt{api} tiers (with the distributed-systems patterns implemented by each \texttt{api} replica), and the shared Redis and MongoDB Replica Set backing services.}
+  \label{fig:architecture}
+\end{figure}
+
 \paragraph{Network placement.} In the validated deployment, all components run within a single Kubernetes cluster (a single-node Minikube instance), but each is an independently scheduled Pod communicating exclusively over the cluster's internal network --- nothing in the design assumes co-location on the same physical node. The architecture therefore does not preclude spreading these components across multiple nodes, or even multiple datacenters, in a production-grade cluster (ex, \emph{Geographic Distribution (Potential)}); this was intentionally left as a deployment-time concern rather than an application-level one.
  
 \paragraph{Component discovery.} All discovery is handled natively by Kubernetes rather than by any custom mechanism in the application code:
@@ -461,11 +427,11 @@ State-update ownership follows directly from \cref{modelling}: MongoDB is the so
  
 \subsection{Security}\label{security}
  
-\paragraph{Authentication.} None is implemented: any operator can join the board with an arbitrary, unverified username. This is a scoped, deliberate omission (already justified in \cref{ds-features}, \emph{Security, Trust}) rather than an oversight --- the project's focus is on distributed coordination, and the domain data involved (incident titles, operator names) does not warrant the added complexity of an identity provider for the current iteration.
- 
-\paragraph{Authorization.} There is a single implicit role (``operator'') with no differentiated permissions --- every connected client can create, claim, release, and resolve any incident. One narrow exception exists: possession of an incident's Redis lock \emph{does} function as a form of \textbf{capability-based authorization} for a single specific action (resolving or releasing that one incident): the server rejects a resolution attempt from anyone other than the current lock holder (\cref{non-functional-requirements}, NFR2), independent of any authenticated identity. This is authorization by \emph{possession of a token} (the lock's stored username value), not by verified identity, and is intentionally the only access-control boundary the current system enforces.
- 
-\paragraph{Cryptography.} No cryptographic schemes are used anywhere in the system: communication between the \texttt{api} tier and MongoDB/Redis is unencrypted (cluster-internal traffic only), no token or signature verification is performed, and no data is encrypted at rest. As with authentication, this is an explicitly scoped-out concern rather than an unconsidered gap, and is listed as a candidate direction in \cref{future-works}.
+\paragraph{Authentication.} A single-factor username/password mechanism is implemented: an operator registers a username and password, the password is hashed with bcrypt before being persisted, and login issues a stateless JSON Web Token (JWT) signed with a secret shared across all \texttt{api} replicas via a Kubernetes \texttt{Secret}. The token is required on every subsequent REST call (\texttt{Authorization: Bearer} header) and on the Socket.IO handshake, and is verified independently by whichever pod happens to receive the request --- no server-side session state is kept, which preserves the stateless, horizontally-scalable nature of the \texttt{api} tier. This remains a scoped, deliberate simplification (already discussed in \cref{ds-features}, \emph{Security, Trust}) rather than an oversight: it is single-factor authentication (username/password are both ``something you know''), not multi-factor, and there is no password-reset flow, account lockout, or rate limiting on login attempts --- the project's focus is on distributed coordination, and the domain data involved (incident titles, operator names) does not warrant the added complexity of a full identity provider for the current iteration.
+
+\paragraph{Authorization.} There is a single implicit role (``operator'') with no differentiated permissions --- every authenticated client can create, claim, release, and resolve any incident. One narrow exception exists: possession of an incident's Redis lock \emph{does} function as a form of \textbf{capability-based authorization} for a single specific action (resolving or releasing that one incident): the server rejects a resolution attempt from anyone other than the current lock holder (\cref{non-functional-requirements}, NFR2). Unlike in an earlier iteration, the lock's stored value is no longer an arbitrary, client-declared string: it is the username extracted server-side from the caller's verified JWT, so the capability (the lock) is now anchored to an authenticated identity rather than to an unverified claim.
+
+\paragraph{Cryptography.} Cryptographic primitives are now used for authentication --- bcrypt for password hashing and HMAC-signed JWTs for session tokens --- but nowhere else in the system: communication between the \texttt{api} tier and MongoDB/Redis remains unencrypted (cluster-internal traffic only), and no data is encrypted at rest. Transport-level and at-rest encryption remain explicitly scoped-out concerns rather than unconsidered gaps, and are listed as a candidate direction in \cref{future-works}.
  
 \section{Implementation}\label{implementation}
 
@@ -541,15 +507,17 @@ Both scripts exploit Redis's single-threaded execution model: no other command c
 
 \subsection{Authentication}\label{impl-authentication}
 
-\textbf{No formal authentication mechanism is implemented.} An operator joins the board by submitting an arbitrary, self-declared username through the login form; this value is attached to the Socket.IO handshake as \texttt{socket.handshake.auth.username} and stored in \texttt{socket.data.username} for the lifetime of the connection. It is also sent as a field in the request body of every mutating REST call (\texttt{createdBy}, \texttt{closedBy}, \texttt{username}).
+\textbf{A single-factor, stateless authentication mechanism is implemented.} An operator first registers via \texttt{POST /api/auth/register} with a username and a password (minimum 8 characters); the password is hashed with \texttt{bcrypt} (10 salt rounds) before being stored in the \texttt{users} MongoDB collection, which carries a unique index on \texttt{username} to prevent duplicate registrations even under concurrent requests from different \texttt{api} pods. \texttt{POST /api/auth/login} verifies the submitted password against the stored hash and, on success, issues a JWT (\texttt{jsonwebtoken}, 12-hour expiry) whose payload identifies the username; both endpoints return the same generic error message for a non-existent user and for a wrong password, to avoid leaking which usernames are registered.
 
-No identity verification is performed: any client can claim any username, and there is no session token, JWT, OAuth flow, or credential store. This is a scoped, deliberate omission already justified in \cref{security}: the project's focus is on distributed coordination, not on identity management, and the data involved (incident titles, operator names) does not warrant the added complexity for the current iteration.
+The JWT is signed with a secret (\texttt{JWT\_SECRET}) injected into every \texttt{api} pod from the same Kubernetes \texttt{Secret} (\texttt{jwt-secret.yaml}). This is what keeps authentication compatible with the system's horizontally-scaled, stateless design: no session state is held by any individual pod, so a token issued by one replica can be verified by any other replica that later receives a request from the same client, with no sticky session required. On the client side, the token is attached as an \texttt{Authorization: Bearer} header on every REST call and as \texttt{socket.handshake.auth.token} on the Socket.IO handshake; an Express middleware (\texttt{authenticate}) and a Socket.IO middleware (\texttt{io.use()}) both verify it independently and reject the request/handshake if it is missing, malformed, or expired.
+
+Identity derived from the verified token, not from client-supplied data, is used everywhere an operator's identity previously had to be trusted: \texttt{createdBy} on incident creation, the lock owner on claim/release, and \texttt{closedBy} on resolution are all now read from \texttt{req.user.username} (REST) or \texttt{socket.data.username} (Socket.IO) rather than from the request body or handshake payload --- closing an impersonation gap where a client could previously act, claim, or resolve incidents under any username of its choosing simply by asserting it. This remains a deliberately scoped simplification: it is single-factor authentication (username and password are both ``something you know'', not a second independent factor), and there is no password-reset flow, account lockout, or brute-force rate limiting on \texttt{/api/auth/login} for the current iteration.
 
 \subsection{Authorization}\label{impl-authorization}
 
-\textbf{No role-based or attribute-based access control is implemented.} All connected operators share the same implicit role and can perform every available action (create, claim, release, resolve). There is, however, one narrow form of \textbf{capability-based authorization} enforced server-side: possession of an incident's Redis lock functions as the sole authorization token for resolving or releasing that specific incident.
+\textbf{No role-based or attribute-based access control is implemented.} All authenticated operators share the same implicit role and can perform every available action (create, claim, release, resolve). There is, however, one narrow form of \textbf{capability-based authorization} enforced server-side: possession of an incident's Redis lock functions as the sole authorization token for resolving or releasing that specific incident.
 
-Concretely, the \texttt{PATCH /api/incidents/:id} handler checks the current lock owner against the \texttt{closedBy} field in the request body before allowing the update to proceed; if they do not match (i.e., someone other than the lock holder is attempting to resolve), the request is rejected with HTTP 409, regardless of what the client UI displays. Similarly, the \texttt{DELETE /api/incidents/:id/claim} handler uses the \texttt{RELEASE\_LOCK\_SCRIPT} to ensure only the lock holder can release it. This is authorization by \emph{possession of a token} (the lock's stored value), not by verified identity.
+Concretely, the \texttt{PATCH /api/incidents/:id} handler checks the current lock owner against the authenticated username of the caller (\texttt{req.user.username}, derived from the verified JWT) before allowing the update to proceed; if they do not match (i.e., someone other than the lock holder is attempting to resolve), the request is rejected with HTTP 409, regardless of what the client UI displays. Similarly, the \texttt{DELETE /api/incidents/:id/claim} handler uses the \texttt{RELEASE\_LOCK\_SCRIPT} to ensure only the lock holder can release it. This is still authorization by \emph{possession of a token} (the lock's stored value) rather than a distinct RBAC/ABAC layer, but that stored value is, since the authentication work described in \cref{impl-authentication}, itself an authenticated identity rather than an arbitrary client-declared string.
 
 \subsection{Technological Details}\label{technological-details}
 
@@ -568,7 +536,7 @@ Concretely, the \texttt{PATCH /api/incidents/:id} handler checks the current loc
 \begin{itemize}
   \item \textbf{Vue.js~3} with the Composition API (\texttt{<script setup>}): the SPA framework. The entire dashboard is a single \texttt{App.vue} component using Vue's reactivity system (\texttt{ref}, \texttt{computed}) to derive filtered views of the incident list and KPI counters from a single reactive \texttt{incidents} array that is kept current by the Socket.IO event stream.
   \item \textbf{Vite~8}: the build tool and development server. The production build (triggered by \texttt{npm run build} inside the multi-stage Dockerfile) produces a static bundle served by Nginx.
-  \item \textbf{socket.io-client~4}: the browser-side Socket.IO library. The connection is established with \texttt{io('/', \{path: '/socket.io', auth: \{username\}\})}, which leverages the Ingress's path-based routing to reach the \texttt{api} service.
+  \item \textbf{socket.io-client~4}: the browser-side Socket.IO library. The connection is established with \texttt{io('/', \{path: '/socket.io', auth: \{token\}\})}, which leverages the Ingress's path-based routing to reach the \texttt{api} service; the token is the same JWT used for REST calls, verified by the server on the handshake (\cref{impl-authentication}).
   \item \textbf{vue-toastification~2}: provides non-blocking toast notifications for all real-time events (new tickets, escalations, resolutions by others) and for local operation failures (claim conflicts, version conflicts, network errors). Configured in \texttt{main.js} with bottom-right positioning, 5-second timeout, and a progress bar.
   \item \textbf{Chart.js~4} (via \texttt{vue-chartjs~5}): renders the bar chart in the ``Incidents Status Overview'' card, with reactive data bindings to the computed KPI properties so the chart updates automatically as the incident counts change.
 \end{itemize}
@@ -684,21 +652,22 @@ All validation was performed via \textbf{manual testing} on the live Kubernetes 
 \subsubsection{FR1 --- Board Access}
 
 \begin{itemize}
-  \item \textbf{Procedure:} open \texttt{http://board.local} in a browser; enter a non-empty username (e.g., ``alice'') and click ``Connetti''.
-  \item \textbf{Expected:} the login screen transitions to the Kanban dashboard; the browser's developer tools show an active WebSocket connection to \texttt{/socket.io}; the ``Users Online'' KPI shows at least~1.
-  \item \textbf{Result:} passed. Submitting an empty username leaves the button disabled (client-side guard).
+  \item \textbf{Procedure:} open \texttt{http://board.local} in a browser; register a new account (username ``alice'', a password of at least 8 characters) and, once redirected to the login form, log in with the same credentials.
+  \item \textbf{Expected:} on successful login, the screen transitions to the Kanban dashboard; the browser's developer tools show an active, authenticated WebSocket connection to \texttt{/socket.io} (the JWT is present in \texttt{auth.token} of the handshake); the ``Users Online'' KPI shows at least~1. Logging in with a wrong password, or attempting to register an already-taken username, is rejected with an error message and no dashboard access.
+  \item \textbf{Result:} passed. The submit button stays disabled until both the username and password fields are non-empty (client-side guard); the server independently rejects short passwords, duplicate usernames, and wrong credentials regardless of what the client sends.
 \end{itemize}
 
 \subsubsection{FR2 --- Incident Creation}
 
 \begin{itemize}
-  \item \textbf{Procedure:} from the dashboard, type a title in the ``Register New Incident'' field and click ``Submit''. Alternatively, send a direct REST call:
+  \item \textbf{Procedure:} from the dashboard, type a title in the ``Register New Incident'' field and click ``Submit''. Alternatively, send a direct REST call authenticated as a previously registered user (\texttt{TOKEN} obtained from \texttt{POST /api/auth/login}):
   \begin{verbatim}
   curl -X POST http://board.local/api/incidents \
+       -H "Authorization: Bearer $TOKEN" \
        -H "Content-Type: application/json" \
-       -d '{"title":"Test incident","status":"open",
-            "createdBy":"alice"}'
+       -d '{"title":"Test incident","status":"open"}'
   \end{verbatim}
+  The \texttt{createdBy} field is no longer accepted from the request body: the server derives it from the authenticated username carried by \texttt{TOKEN}.
   \item \textbf{Expected:} the API returns \texttt{201}; the new incident appears in the ``Open'' column of the originating client \emph{and} of a second client connected in a different browser, without either client refreshing.
   \item \textbf{Result:} passed. The Change Stream triggers an \texttt{incident\_update} event of type \texttt{insert}, which both clients receive independently.
 \end{itemize}
@@ -714,16 +683,15 @@ All validation was performed via \textbf{manual testing} on the live Kubernetes 
 \subsubsection{FR4 --- Ticket Claiming (Mutual Exclusion)}
 
 \begin{itemize}
-  \item \textbf{Procedure:} create an incident, then attempt to claim it from two clients simultaneously:
+  \item \textbf{Procedure:} create an incident, then attempt to claim it from two authenticated clients simultaneously (\texttt{ALICE\_TOKEN} and \texttt{BOB\_TOKEN} obtained from separate \texttt{POST /api/auth/login} calls):
   \begin{verbatim}
   curl -X POST http://board.local/api/incidents/<id>/claim \
-       -H "Content-Type: application/json" \
-       -d '{"username":"alice"}' &
+       -H "Authorization: Bearer $ALICE_TOKEN" &
   curl -X POST http://board.local/api/incidents/<id>/claim \
-       -H "Content-Type: application/json" \
-       -d '{"username":"bob"}' &
+       -H "Authorization: Bearer $BOB_TOKEN" &
   wait
   \end{verbatim}
+  The lock owner is no longer taken from a \texttt{username} field in the request body: it is the authenticated username carried by each token, so neither client can claim on behalf of the other.
   \item \textbf{Expected:} exactly one request returns \texttt{200} with \texttt{\{"success":true, "lockedBy":"..."\}}; the other returns \texttt{409} with the name of the current owner.
   \item \textbf{Result:} passed. The Redis \texttt{SET NX PX} command is atomic; concurrent arrivals are serialized by Redis's single-threaded execution.
 \end{itemize}
@@ -731,7 +699,7 @@ All validation was performed via \textbf{manual testing} on the live Kubernetes 
 \subsubsection{FR5 --- Explicit Claim Release}
 
 \begin{itemize}
-  \item \textbf{Procedure:} claim an incident as ``alice'', then click ``Release'' (or send \texttt{DELETE /api/incidents/<id>/claim} with \texttt{\{"username":"alice"\}}). Immediately attempt to claim the same incident as ``bob''.
+  \item \textbf{Procedure:} claim an incident as ``alice'', then click ``Release'' (or send \texttt{DELETE /api/incidents/<id>/claim} authenticated as alice, i.e., with \texttt{-H "Authorization: Bearer \$ALICE\_TOKEN"} and no body --- the releasing username is taken from the token, not from a request field). Immediately attempt to claim the same incident as ``bob''.
   \item \textbf{Expected:} the release returns \texttt{200}; bob's subsequent claim succeeds with \texttt{200}; the incident moves back from ``In Progress'' to its original column (``Open'' or ``Escalated'') on all clients.
   \item \textbf{Result:} passed. The \texttt{RELEASE\_LOCK\_SCRIPT} atomically verifies ownership before deleting the key.
 \end{itemize}
@@ -739,7 +707,7 @@ All validation was performed via \textbf{manual testing} on the live Kubernetes 
 \subsubsection{FR6 --- Ticket Resolution}
 
 \begin{itemize}
-  \item \textbf{Procedure:} claim an incident as ``alice'', then click ``Resolve'' (or send \texttt{PATCH /api/incidents/<id>} with \texttt{\{"status":"closed", "version":<current>, "closedBy":"alice"\}}).
+  \item \textbf{Procedure:} claim an incident as ``alice'', then click ``Resolve'' (or send \texttt{PATCH /api/incidents/<id>} authenticated as alice with \texttt{\{"status":"closed", "version":<current>\}} --- \texttt{closedBy} is no longer accepted as a request field and is instead taken from the authenticated username).
   \item \textbf{Expected:} the API returns \texttt{200}; the incident moves to the ``Resolved'' column on all clients; the ``Claim'' button is no longer available for this incident; the \texttt{closedBy} field shows ``alice''.
   \item \textbf{Result:} passed. The lock is released atomically by the \texttt{RELEASE\_LOCK\_SCRIPT} within the same PATCH handler.
 \end{itemize}
@@ -794,14 +762,15 @@ All validation was performed via \textbf{manual testing} on the live Kubernetes 
 \subsubsection{NFR2 --- Server-Enforced Mutual Exclusion}
 
 \begin{itemize}
-  \item \textbf{Procedure:} claim an incident as ``alice'' via the UI. Then, bypassing the UI entirely, send a direct PATCH request as ``bob'':
+  \item \textbf{Procedure:} claim an incident as ``alice'' via the UI. Then, bypassing the UI entirely, send a direct PATCH request authenticated as ``bob'' (a genuinely registered, logged-in user, i.e., a real \texttt{BOB\_TOKEN} from \texttt{POST /api/auth/login}):
   \begin{verbatim}
   curl -X PATCH http://board.local/api/incidents/<id> \
+       -H "Authorization: Bearer $BOB_TOKEN" \
        -H "Content-Type: application/json" \
-       -d '{"status":"closed","version":1,"closedBy":"bob"}'
+       -d '{"status":"closed","version":1}'
   \end{verbatim}
-  \item \textbf{Expected:} the API rejects the request with \texttt{409} (``Incidente bloccato da un altro utente'', \texttt{lockedBy: "alice"}), even though the UI would have hidden the resolve button for bob.
-  \item \textbf{Result:} passed. The server-side check (\texttt{currentOwner \&\& currentOwner !== closedBy}) is independent of any UI state.
+  \item \textbf{Expected:} the API rejects the request with \texttt{409} (``Incidente bloccato da un altro utente'', \texttt{lockedBy: "alice"}), even though the UI would have hidden the resolve button for bob, and even though bob is authenticating with his own genuine credentials rather than a spoofed identity.
+  \item \textbf{Result:} passed. The server-side check (\texttt{currentOwner \&\& currentOwner !== req.user.username}) compares the lock owner against bob's identity as derived from his verified JWT, not from any client-supplied field --- so this check can no longer be defeated even by a client that tries to claim a different \texttt{closedBy} in the request body, since that field is ignored entirely.
 \end{itemize}
 
 \subsubsection{NFR3 --- Fault Tolerance of the API Tier}
@@ -955,13 +924,21 @@ This creates five resources: the headless Service (\texttt{mongo}), the ConfigMa
 %
 \textbf{Expected outcome:} a single \texttt{redis} pod starts and becomes ready within a few seconds.
 
-\paragraph{Step~3: API (Deployment, Service).}
+\paragraph{Step~3: JWT Secret.} The \texttt{api} Deployment requires the \texttt{jwt-secret} Secret to exist before it starts, since \texttt{JWT\_SECRET} is injected via \texttt{secretKeyRef}:
+%
+\begin{verbatim}
+  kubectl apply -f k8s/jwt-secret.yaml
+\end{verbatim}
+%
+\textbf{Expected outcome:} the \texttt{Secret} \texttt{jwt-secret} is created in the \texttt{app} namespace, holding the HMAC key shared by all \texttt{api} replicas. For any deployment beyond local development/demo purposes, the placeholder value committed in the manifest should be replaced, e.g.\ by regenerating it with \texttt{kubectl create secret generic jwt-secret --namespace app --from-literal=JWT\_SECRET=\$(openssl rand -base64 48) --dry-run=client -o yaml | kubectl apply -f -}.
+
+\paragraph{Step~4: API (Deployment, Service).}
 %
 \begin{verbatim}
   kubectl apply -f k8s/api.yaml
 \end{verbatim}
 %
-\textbf{Expected outcome:} 3 \texttt{api} pods start. Each pod connects to the MongoDB Replica Set and to Redis on startup; if either dependency is not yet available, the pod exits with a fatal error and Kubernetes restarts it (the readiness probe prevents it from receiving traffic until all dependencies are reachable). Steady state is reached within 20--30 seconds:
+\textbf{Expected outcome:} 3 \texttt{api} pods start. Each pod connects to the MongoDB Replica Set and to Redis on startup, and reads the shared \texttt{JWT\_SECRET} from the Secret created in Step~3; if any dependency is not yet available, the pod exits with a fatal error and Kubernetes restarts it (the readiness probe prevents it from receiving traffic until all dependencies are reachable). Steady state is reached within 20--30 seconds:
 %
 \begin{verbatim}
   kubectl get pods -n app -l app=api
@@ -969,7 +946,7 @@ This creates five resources: the headless Service (\texttt{mongo}), the ConfigMa
 %
 All 3 pods should show \texttt{Running} with \texttt{READY 1/1}.
 
-\paragraph{Step~4: HorizontalPodAutoscaler.}
+\paragraph{Step~5: HorizontalPodAutoscaler.}
 %
 \begin{verbatim}
   kubectl apply -f k8s/hpa.yaml
@@ -981,7 +958,7 @@ All 3 pods should show \texttt{Running} with \texttt{READY 1/1}.
   kubectl get hpa -n app
 \end{verbatim}
 
-\paragraph{Step~5: Web frontend (Deployment, Service).}
+\paragraph{Step~6: Web frontend (Deployment, Service).}
 %
 \begin{verbatim}
   kubectl apply -f k8s/web.yaml
@@ -989,7 +966,7 @@ All 3 pods should show \texttt{Running} with \texttt{READY 1/1}.
 %
 \textbf{Expected outcome:} a single \texttt{web} pod starts, running the Nginx container that serves the compiled Vue~3 SPA on port~80.
 
-\paragraph{Step~6: Ingress.}
+\paragraph{Step~7: Ingress.}
 %
 \begin{verbatim}
   kubectl apply -f k8s/ingress.yaml
@@ -1009,7 +986,7 @@ Opening \texttt{http://board.local} in a browser should display the login screen
 
 \subsection{Environment Variables}\label{env-vars}
 
-The \texttt{api} pods receive their configuration entirely via environment variables defined in \texttt{k8s/api.yaml}. No \texttt{.env} files, ConfigMaps, or Secrets are used for the API configuration.
+The \texttt{api} pods receive their configuration via environment variables defined in \texttt{k8s/api.yaml}. Most values are set directly in the manifest; the one sensitive value, \texttt{JWT\_SECRET}, is instead injected from a dedicated Kubernetes \texttt{Secret} (\texttt{k8s/jwt-secret.yaml}) via \texttt{secretKeyRef}, so that it never appears in plain text in the Deployment spec itself. No \texttt{.env} files or ConfigMaps are used for the API configuration.
 
 \begin{itemize}
   \item \texttt{MONGO\_URL} --- the MongoDB connection string, listing all three Replica Set members with their stable StatefulSet DNS names and the \texttt{replicaSet=rs0} parameter:
@@ -1022,6 +999,8 @@ The \texttt{api} pods receive their configuration entirely via environment varia
   \item \texttt{REDIS\_URL} --- the Redis connection endpoint, using the ClusterIP Service name: \texttt{redis://redis:6379}.
 
   \item \texttt{CORS\_ORIGIN} --- the allowed origin for CORS and Socket.IO cross-origin requests: \texttt{http://board.local}, matching the Ingress hostname.
+
+  \item \texttt{JWT\_SECRET} --- the HMAC secret used to sign and verify JSON Web Tokens, sourced from the \texttt{jwt-secret} Kubernetes \texttt{Secret} rather than a literal value. All three \texttt{api} replicas mount the same Secret, which is what allows any pod to verify a token issued by any other pod without shared session state or sticky sessions.
 \end{itemize}
 %
 Additionally, the API code reads \texttt{os.hostname()} to obtain a unique pod identifier (e.g., \texttt{api-7685fc6bd-4wv68}), used as the value for Redis leader-election and lock keys. This requires no explicit configuration, as Kubernetes automatically sets the hostname to the pod name.
@@ -1032,12 +1011,13 @@ The \texttt{web} and \texttt{redis} deployments require no environment variables
 
 The project does \textbf{not} use Docker Compose. While Docker Compose would be simpler for local development, it cannot exercise the Kubernetes-specific distributed-systems mechanisms that are central to the project's educational objectives: StatefulSets with stable network identities, PodDisruptionBudgets, HorizontalPodAutoscaler, Ingress with session affinity, and liveness/readiness probe separation. The deployment is therefore defined entirely as Kubernetes manifests (\texttt{k8s/*.yaml}), validated on Minikube.
 
-The six manifest files and their purposes are summarized below:
+The seven manifest files and their purposes are summarized below:
 
 \begin{itemize}
   \item \texttt{mongo.yaml} --- 5 resources: headless Service, ConfigMap (init script), StatefulSet (3 replicas with PVCs), init Job, PodDisruptionBudget.
   \item \texttt{redis.yaml} --- 2 resources: Deployment (1 replica), ClusterIP Service.
   \item \texttt{api.yaml} --- 2 resources: Deployment (3 replicas, liveness/readiness probes, resource limits), ClusterIP Service.
+  \item \texttt{jwt-secret.yaml} --- 1 resource: \texttt{Secret} holding \texttt{JWT\_SECRET}, the HMAC key shared by all \texttt{api} replicas to sign and verify authentication tokens.
   \item \texttt{hpa.yaml} --- 1 resource: HorizontalPodAutoscaler (3--10 replicas, 80\% CPU target).
   \item \texttt{web.yaml} --- 2 resources: Deployment (1 replica), ClusterIP Service.
   \item \texttt{ingress.yaml} --- 1 resource: Ingress (host \texttt{board.local}, 3 path rules, cookie-based sticky sessions).
@@ -1061,9 +1041,10 @@ This section describes how to use the application from the operator's perspectiv
 
 \begin{enumerate}
   \item Open \texttt{http://board.local} in a modern web browser (Chrome, Firefox, Edge, or Safari).
-  \item The \textbf{login screen} is displayed: a centered card with a pulsing green indicator, a title (``Entra nella Board''), and a text field labeled ``Il tuo nome...''.
-  \item Type a username (any non-empty string, e.g., ``alice'') and either press \texttt{Enter} or click the ``Connetti'' button. The button remains disabled until at least one character is entered.
-  \item \textbf{Expected outcome:} the login screen transitions to the main dashboard. A success toast notification confirms the connection (``Benvenuto nella dashboard, alice!''). A persistent WebSocket connection is established in the background.
+  \item The \textbf{login screen} is displayed: a centered card with a pulsing green indicator, a title (``Accedi alla Board''), a username field, and a password field.
+  \item \textbf{First-time operators} click the ``Registrati'' link to switch the card to registration mode, enter a username and a password of at least 8 characters, and submit. On success, the form switches back to login mode.
+  \item \textbf{Returning operators} type their username and password directly and either press \texttt{Enter} or click the ``Accedi'' button. The button remains disabled until both fields are non-empty. An incorrect username/password combination is rejected with an inline error message and the operator remains on the login screen.
+  \item \textbf{Expected outcome:} on a successful login, the screen transitions to the main dashboard. A success toast notification confirms the connection (``Benvenuto nella dashboard, alice!''). A persistent, authenticated WebSocket connection is established in the background, and a ``Esci'' (logout) button appears in the header to end the session.
 \end{enumerate}
 
 \subsection{Dashboard Overview}\label{ug-dashboard}
@@ -1228,8 +1209,51 @@ It should be noted that each student is only responsible for their own section.
 
 \section{Future works}\label{future-works}
 
-Discuss possible future works, improvements, extensions, optimizations, etc.
+The current iteration deliberately scopes out several directions in order to keep the focus on the
+distributed-systems aspects of the project. The most relevant candidates for future work are:
 
-Also discuss here any unimplemented feature, and how you would have implemented it.
+\begin{itemize}
+  \item \textbf{Transport security.} Traffic between the browser and the Ingress, and between the
+  \texttt{api} pods and their backing services (MongoDB, Redis), is currently unencrypted
+  (\cref{ds-features}). A production-grade deployment would terminate TLS at the Ingress and enable
+  TLS for the MongoDB Replica Set and Redis connections, plus encryption at rest for the MongoDB
+  volumes.
+
+  \item \textbf{Fine-grained authorization.} All authenticated operators currently share a single
+  implicit role. Introducing roles (e.g., operator vs. supervisor) with differentiated permissions
+  --- such as restricting who can resolve escalated incidents, or exposing an audit trail of who
+  claimed/released/resolved which incident --- would be a natural extension of the authorization
+  model described in \cref{impl-authentication}.
+
+  \item \textbf{Account lifecycle hardening.} Login currently has no rate limiting, account lockout,
+  or password-reset flow. Adding these (e.g., exponential backoff per username/IP, a lockout after
+  repeated failures) would close an obvious brute-force gap without changing the stateless nature of
+  the \texttt{api} tier.
+
+  \item \textbf{Robust error handling on the client.} As noted in \cref{acceptance-test} (FR10), the
+  incident-creation request path does not check the HTTP response status or catch network failures,
+  so a failed \texttt{POST /api/incidents} still shows a success toast. The fix is mechanical
+  (wrap the \texttt{fetch} in a \texttt{try/catch}, branch on \texttt{response.ok}, and surface a
+  failure toast) but was left out of the current iteration since it does not affect the distributed
+  coordination logic under test.
+
+  \item \textbf{Responsive / mobile layout.} The dashboard currently uses a fixed-column CSS Grid
+  layout designed for a desktop viewport, with no \texttt{@media} breakpoints. Supporting narrower
+  viewports would require reflowing the KPI row and Kanban columns (e.g., collapsing to a
+  single-column, tab-based view below a given width) rather than a purely cosmetic change.
+
+  \item \textbf{Drag-and-drop interactions.} Kanban cards currently move between columns
+  automatically as a side effect of status/lock changes; there is no direct manipulation. Adding
+  drag-and-drop (e.g., dragging a card into ``In Progress'' to claim it) would need to reconcile the
+  optimistic client-side move with the same claim/release/resolve endpoints and lock semantics
+  already in place, rather than introduce a separate mutation path.
+
+  \item \textbf{Horizontal scaling of stateful services.} MongoDB already runs as a 3-node Replica
+  Set and \texttt{api} scales horizontally via the HPA, but Redis remains a single instance
+  (\cref{fault-tolerance}) and is therefore both a scalability ceiling and, if unavailable, the one
+  component whose loss degrades the system to read-only (an explicit CAP/AP trade-off already
+  discussed in \cref{ds-features}). Moving to Redis Sentinel or Redis Cluster would remove this
+  single point of failure at the cost of additional operational complexity.
+\end{itemize}
 
 \end{document}
