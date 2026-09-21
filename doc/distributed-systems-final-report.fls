@@ -1,8 +1,8 @@
-PWD /Users/Shared/Files From d.localized/Unibo/Magistrale/Distributed systems/progetto/realtime_incident_board/doc
+PWD /Users/Shared/Files From d.localized/Unibo/Magistrale/Distributed systems/progetto/Distributed_Systems_Project/doc
 INPUT /usr/local/texlive/2026/texmf.cnf
 INPUT /usr/local/texlive/2026/texmf-dist/web2c/texmf.cnf
 INPUT /usr/local/texlive/2026/texmf-var/web2c/pdftex/pdflatex.fmt
-INPUT /Users/Shared/Files From d.localized/Unibo/Magistrale/Distributed systems/progetto/realtime_incident_board/doc/distributed-systems-final-report.tex
+INPUT /Users/Shared/Files From d.localized/Unibo/Magistrale/Distributed systems/progetto/Distributed_Systems_Project/doc/distributed-systems-final-report.tex
 OUTPUT distributed-systems-final-report.log
 INPUT /usr/local/texlive/2026/texmf-dist/tex/latex/koma-script/scrartcl.cls
 INPUT /usr/local/texlive/2026/texmf-dist/tex/latex/koma-script/scrartcl.cls

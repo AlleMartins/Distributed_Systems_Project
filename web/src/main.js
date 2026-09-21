@@ -1,6 +1,9 @@
 import { createApp } from 'vue'
 import App from './App.vue'
 
+// Stili condivisi fra i componenti (palette, card, input, bottoni)
+import './assets/styles.css'
+
 // Importa Toastification e il suo CSS
 import Toast from "vue-toastification"
 import "vue-toastification/dist/index.css"

@@ -4,7 +4,25 @@ metadata:
   name: web
   namespace: app
 spec:
-  replicas: 1
+  # 2 repliche, non 1. La caduta di web non interrompe le sessioni già
+  # aperte (la SPA è già scaricata e parla con api via WebSocket), ma
+  # blocca ogni nuovo accesso e ogni reload: con una sola replica il punto
+  # di ingresso al sistema aveva disponibilità 1, davanti a 3 repliche API.
+  # NOTA per la relazione: Minikube è mono-nodo, quindi questa è ridondanza
+  # a livello di POD (crash del processo, eviction, rollout), non di nodo.
+  # Se cade il nodo cadono entrambe: non dichiararla come HA infrastrutturale.
+  replicas: 2
+  strategy:
+    rollingUpdate:
+      # maxUnavailable: 0 -> durante un rollout non si scende mai sotto le
+      # 2 repliche pronte: il pod nuovo entra nel Service prima che il
+      # vecchio venga terminato. È ciò che elimina la finestra di 503
+      # osservabile con `kubectl rollout restart deployment/web`.
+      # Attenzione: i rollout NON sono governati dal PodDisruptionBudget
+      # qui sotto, ma da questa strategy. I due meccanismi sono
+      # complementari e coprono disruption diverse.
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: web
@@ -19,6 +37,55 @@ spec:
         imagePullPolicy: Never
         ports:
         - containerPort: 80
+        # Senza requests lo scheduler non riserva nulla per web, che finisce
+        # a competere per la CPU del nodo con le repliche API scalate
+        # dall'HPA. I valori sono bassi di proposito: è Nginx che serve
+        # file statici, non un runtime applicativo.
+        resources:
+          requests:
+            cpu: "10m"
+            memory: "16Mi"
+          limits:
+            cpu: "100m"
+            memory: "64Mi"
+        # Senza readinessProbe un pod entra negli endpoint del Service
+        # appena il container è in stato Running, non appena Nginx serve
+        # davvero: esattamente la finestra che le 2 repliche dovrebbero
+        # chiudere. Con la probe, maxUnavailable: 0 ha un significato reale.
+        # A differenza di api, qui le due probe controllano la stessa cosa,
+        # perché web non ha dipendenze esterne da distinguere: restano
+        # separate per lo scopo, non per la profondità del check.
+        # Se Nginx non serve più index.html il processo è rotto e il
+        # riavvio è la risposta corretta (per api non lo sarebbe: là un
+        # fallimento significherebbe Mongo o Redis giù).
+        # Alla terminazione di un pod, l'invio di SIGTERM e la rimozione
+        # dall'endpoint del Service avvengono in PARALLELO, non in ordine:
+        # Nginx smette di accettare connessioni mentre kube-proxy ha ancora
+        # regole iptables che puntano a lui, e per qualche centinaio di ms i
+        # client prendono "connection refused". Misurato: senza questo hook i
+        # fallimenti durante un rollout cadono esattamente sugli istanti di
+        # rimozione dal Service, pur non scendendo mai sotto le 2 repliche
+        # pronte. Lo sleep tiene il pod in servizio finché la rimozione si è
+        # propagata; solo dopo arriva SIGTERM. Senza, `maxUnavailable: 0`
+        # garantisce la capacità ma non l'assenza di errori.
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sleep", "5"]
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 1
+          periodSeconds: 3
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
 ---
 apiVersion: v1
 kind: Service
@@ -31,3 +98,22 @@ spec:
   ports:
   - port: 80
     targetPort: 80
+---
+# Protegge web dalle disruption VOLONTARIE (drain di un nodo, upgrade,
+# descheduling): l'eviction di un pod viene rifiutata se lascerebbe meno
+# di 1 replica disponibile. Non protegge da crash, OOMKill, caduta del
+# nodo o `kubectl delete pod`, che non passano dall'Eviction API.
+# minAvailable: 1 su 2 repliche lascia sempre un pod sacrificabile.
+# Con `replicas: 1` un PDB così bloccherebbe *per sempre* qualunque drain,
+# perché nessun pod sarebbe evictabile: è l'altro motivo per cui la
+# seconda replica viene prima del budget.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web-pdb
+  namespace: app
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: web

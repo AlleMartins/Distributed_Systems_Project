@@ -1,0 +1,66 @@
+/*
+ * Stili condivisi da più componenti (palette, "card", input, bottoni).
+ * Stanno qui e non in uno <style scoped> perché uno stile scoped non
+ * attraversa il confine del componente: queste classi servono ad AuthCard,
+ * KpiRow, IncidentCard... e duplicarle in ognuno le farebbe divergere.
+ * Tutto ciò che riguarda un solo componente resta invece scoped nel suo file.
+ */
+
+* { box-sizing: border-box; }
+
+body { margin: 0; }
+
+/* -- Palette testi -- */
+.text-light { color: #ffffff; }
+.text-yellow { color: #FBBF24; }
+.text-magenta { color: #E94560; }
+.text-orange { color: #f59e0b; }
+.text-green { color: #10b981; }
+.text-blue { color: #3b82f6; }
+.text-muted { color: #9ca3af; }
+
+/* -- Contenitori -- */
+.card {
+  background-color: #22223B;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.card-title { margin-top: 0; font-size: 1rem; color: #ffffff; text-align: center; margin-bottom: 1.5rem; font-weight: 500; }
+.subtitle { color: #a1a1aa; font-size: 0.9rem; margin-top: 0.5rem; }
+
+/* -- Indicatore di connessione live -- */
+.pulse-indicator { width: 10px; height: 10px; background-color: #10b981; border-radius: 50%; animation: pulse 2s infinite; }
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+  70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+/* -- Form -- */
+.col-input { display: flex; flex-direction: column; gap: 0.75rem; }
+.dark-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  background-color: #1A1A2E;
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  outline: none;
+}
+.dark-input:focus { border-color: #E94560; }
+
+.magenta-btn {
+  background-color: #E94560;
+  color: white;
+  border: none;
+  padding: 0.75rem;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+.magenta-btn:hover:not(:disabled) { background-color: #d13d56; }
+.magenta-btn:disabled { background-color: #4b5563; cursor: not-allowed; }

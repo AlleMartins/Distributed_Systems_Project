@@ -70,3 +70,21 @@ spec:
   ports:
   - port: 3000
     targetPort: 3000
+---
+# Stesso scopo del mongo-pdb, ma con una soglia RELATIVA invece che
+# assoluta: le repliche API non sono un numero fisso, l'HPA le scala da 3
+# a 10. `minAvailable: 2` sarebbe troppo lasco a 10 repliche (un drain
+# potrebbe portarne via 8 insieme) e inutilmente stretto se l'HPA
+# scendesse; `maxUnavailable: 1` si adatta da solo al numero corrente.
+# Vale solo per le disruption volontarie: i rolling update restano
+# governati dalla strategy del Deployment.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-pdb
+  namespace: app
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: api
