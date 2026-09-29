@@ -25,21 +25,20 @@
 
 \begin{abstract}
     This project presents a distributed real-time incident management system designed for collaborative ticket resolution in operational environments. 
-    The system enables multiple operators to simultaneously interact with a shared pool of incidents through a web-based Kanban dashboard, providing real-time synchronization, mutual exclusion for ticket claiming, and automatic SLA-based escalation. 
+    The system enables multiple operators to simultaneously interact with a shared pool of incidents through a web-based Kanban dashboard. 
     The architecture follows a three-tier pattern: a Vue.js 3 single-page application serves as the presentation layer, an Express.js API with Socket.IO handles real-time communication and business logic, while a MongoDB Replica Set ensures persistent strongly-consistent state and Redis provides distributed coordination. 
     Key distributed systems patterns implemented include: (i) Redis-based distributed locking with Lua scripts for atomic claim/release operations, preventing race conditions during ticket assignment; (ii) optimistic locking via document versioning in MongoDB to avoid lost updates during concurrent modifications; 
     (iii) leader election using Redis TTL keys for exclusive execution of background tasks (automatic escalation of stale incidents); (iv) MongoDB Change Streams for reactive, event-driven synchronization across all connected clients without polling. 
     The entire system is containerized and orchestrated via Kubernetes, featuring a 3-node MongoDB StatefulSet for data persistence and failover, Horizontal Pod Autoscaler for the API tier (3--10 replicas), and an Ingress with session affinity. 
-    The CAP theorem is addressed by choosing CP consistency for the data layer (MongoDB) while providing graceful AP degradation for coordination features (Redis), ensuring critical incident data remains consistent even during network partitions.
 \end{abstract}
 
 \section{Concept}\label{concept}
 
 \subsection{Product Type}
 
-The project consists of a \textbf{web application} with a real-time graphical user interface (GUI).
-Specifically, it is a \emph{Single-Page Application} (SPA) built with Vue.js~3, served as a static web application and interacting with a distributed backend via HTTP and WebSocket protocols.
-The frontend presents a \textbf{Kanban-style dashboard} that allows multiple operators to visualize, create, claim, and resolve incidents in real time.
+The project consists of a web application with a real-time graphical user interface (GUI).
+Specifically, it is a Single-Page Application (SPA) built with Vue.js~3, served as a static web application and interacting with a distributed backend via HTTP and WebSocket protocols.
+The frontend presents a Kanban-style dashboard that allows multiple operators to visualize, create, claim, and resolve incidents in real time.
 
 \subsection{Use Case Description}
 
@@ -56,45 +55,6 @@ The system implements a \textbf{real-time incident management board} (similar to
     \item \textbf{User presence tracking:} the system displays the list of currently connected operators
 \end{itemize}
 
-\subsubsection{Where the users are}
-
-Users (operators) access the system from \textbf{web browsers} connected to the same network where the Kubernetes cluster is deployed.
-The Ingress controller exposes the application at \texttt{http://board.local}, making it accessible to any client within the network reach.
-Given the containerized deployment on Kubernetes, the system could be deployed on any cloud provider or on-premises infrastructure, making the operators geographically distributed as long as they have network connectivity to the cluster.
-
-\subsubsection{When and how frequently they interact}
-
-Interaction is \textbf{continuous and event-driven} during operational shifts.
-Operators may:
-%
-\begin{itemize}
-    \item Create incidents sporadically (when new issues are reported)
-    \item Claim and resolve incidents in bursts (during active troubleshooting)
-    \item Monitor the dashboard passively (watching for escalations or new tickets)
-\end{itemize}
-The background escalation task runs every 10 seconds, making the system inherently time-sensitive.
-
-\subsubsection{How they interact and which devices}
-
-Users interact through a \textbf{desktop web browser} (any modern browser is supported).
-The interaction model is:
-%
-\begin{itemize}
-    \item \textbf{Login phase:} the operator registers or logs in with a username and password to join the board
-    \item \textbf{Dashboard phase:} a Kanban board displays four columns (Open, In Progress, Escalated, Resolved); cards move between columns automatically as their underlying status or lock state changes
-    \item \textbf{Actions:} buttons for claiming, releasing, and resolving tickets; a search bar for filtering; toggle buttons for viewing only escalated or personal tickets
-    \item \textbf{Notifications:} toast notifications alert the operator of events (new tickets, escalations, resolutions by others)
-\end{itemize}
-
-\subsubsection{Data storage}
-
-The system stores the following data persistently in \textbf{MongoDB}:
-%
-\begin{itemize}
-    \item \textbf{Incidents:} title, status (\texttt{open}, \texttt{escalated}, \texttt{closed}), creator (\texttt{createdBy}), closer (\texttt{closedBy}), version number for optimistic locking, and timestamps
-    \item \textbf{Version history:} implicitly tracked via the \texttt{version} field and \texttt{updatedAt} timestamps
-\end{itemize}
-
 \textbf{Redis} is used for \textbf{transient coordination state} (not persistent data):
 %
 \begin{itemize}
@@ -103,18 +63,7 @@ The system stores the following data persistently in \textbf{MongoDB}:
     \item Socket.IO adapter for cross-pod message broadcasting
 \end{itemize}
 
-\subsubsection{User roles}
-
-The system currently supports a \textbf{single role} (operator), but the architecture naturally supports differentiation:
-%
-\begin{itemize}
-    \item \textbf{Operator:} can create, claim, release, and resolve incidents; views all incidents and online users
-    \item (Extensible) \textbf{Supervisor:} could be added to view analytics, override locks, or manage SLA thresholds
-\end{itemize}
-
 \subsection{Why Distribution is Needed}
-
-Distribution is not merely an implementation choice but a \textbf{fundamental requirement} for this system, motivated by the following factors:
 
 \subsubsection{Fault Tolerance}
 
@@ -157,107 +106,93 @@ The MongoDB Replica Set could be extended with nodes in different data centers, 
 
 \section{Requirements Elicitation and Analysis}\label{requirements}
 
-This chapter defines \emph{what} the system must do (functional requirements), the qualities it must exhibit (non-functional requirements), and the constraints imposed on its realization (implementation requirements). Each requirement is numbered and paired with an acceptance criterion that is later used, unchanged, as the basis for the validation phase (\cref{validation}).
-
 \subsection{Functional Requirements}\label{functional-requirements}
 
 \begin{itemize}
-  \item[\textbf{1}] \textbf{Board access.} An operator can join the board by registering a username/password pair and, on subsequent visits, logging in with those credentials. \\
+  \item[\textbf{FR1}] \textbf{Board access.} An operator can join the board by registering a username/password pair and, on subsequent visits, logging in with those credentials. \\
   \emph{Acceptance criterion:} submitting valid credentials on the login form transitions the client from the login screen to the dashboard and establishes a persistent, authenticated WebSocket connection; submitting invalid credentials is rejected with an error and no connection is established.
 
-  \item[\textbf{2}] \textbf{Incident creation.} An operator can create a new incident by providing a title; the system assigns it a default status of \texttt{open}, a creation timestamp, and the creator's identity. \\
+  \item[\textbf{FR2}] \textbf{Incident creation.} An operator can create a new incident by providing a title; the system assigns it a default status of \texttt{open}, a creation timestamp, and the creator's identity. \\
   \emph{Acceptance criterion:} a valid \texttt{POST /api/incidents} request returns \texttt{201} and the new incident appears as a card in the ``Open'' column of every connected client without any client issuing a manual refresh.
 
-  \item[\textbf{3}] \textbf{Real-time board synchronization.} All connected operators must observe incident creations, claims, releases, resolutions, and escalations as they happen. \\
+  \item[\textbf{FR3}] \textbf{Real-time board synchronization.} All connected operators must observe incident creations, claims, releases, resolutions, and escalations as they happen. \\
   \emph{Acceptance criterion:} an action performed by operator A becomes visible on operator B's board without B reloading the page or polling.
 
-  \item[\textbf{4}] \textbf{Ticket claiming (mutual exclusion).} An operator can claim an \texttt{open} or \texttt{escalated} incident for exclusive handling; once claimed, no other operator can claim or resolve it. \\
+  \item[\textbf{FR4}] \textbf{Ticket claiming (mutual exclusion).} An operator can claim an \texttt{open} or \texttt{escalated} incident for exclusive handling; once claimed, no other operator can claim or resolve it. \\
   \emph{Acceptance criterion:} of two concurrent claim requests on the same incident, exactly one succeeds (\texttt{200}) and the other is rejected (\texttt{409}, reporting the current owner).
 
-  \item[\textbf{5}] \textbf{Explicit claim release.} An operator holding a claim can release it without resolving the incident, returning it to the shared pool for other operators. \\
+  \item[\textbf{FR5}] \textbf{Explicit claim release.} An operator holding a claim can release it without resolving the incident, returning it to the shared pool for other operators. \\
   \emph{Acceptance criterion:} after a successful release, the incident becomes claimable again immediately, without waiting for the automatic lock expiry.
 
-  \item[\textbf{6}] \textbf{Ticket resolution.} The operator currently holding the claim on an incident can mark it as \texttt{closed}, recording who closed it and releasing the associated lock. \\
+  \item[\textbf{FR6}] \textbf{Ticket resolution.} The operator currently holding the claim on an incident can mark it as \texttt{closed}, recording who closed it and releasing the associated lock. \\
   \emph{Acceptance criterion:} a resolved incident moves to the ``Resolved'' column on every client and can no longer be claimed or resolved again.
 
-  \item[\textbf{7}] \textbf{Automatic SLA escalation.} Incidents left in the \texttt{open} status beyond a configured threshold (5 minutes) are automatically transitioned to \texttt{escalated} without operator intervention. \\
+  \item[\textbf{FR7}] \textbf{Automatic SLA escalation.} Incidents left in the \texttt{open} status beyond a configured threshold (5 minutes) are automatically transitioned to \texttt{escalated} without operator intervention. \\
   \emph{Acceptance criterion:} an incident older than the threshold changes to \texttt{escalated} within one execution cycle of the background task ($\leq 10$ seconds after threshold crossing) and moves to the ``Escalated'' column on every client.
 
-  \item[\textbf{8}] \textbf{Presence awareness.} The system displays the set of operators currently connected to the board. \\
+  \item[\textbf{FR8}] \textbf{Presence awareness.} The system displays the set of operators currently connected to the board. \\
   \emph{Acceptance criterion:} the online-users list reflects a new connection within one broadcast cycle, and a user disappears from the list once their connection is terminated (including ungraceful terminations).
 
-  \item[\textbf{9}] \textbf{Filtering and search.} An operator can narrow the visible incidents via free-text search on the title, an ``escalated only'' toggle, and a ``mine only'' toggle (incidents they created, claimed, or resolved). \\
+  \item[\textbf{FR9}] \textbf{Filtering and search.} An operator can narrow the visible incidents via free-text search on the title, an ``escalated only'' toggle, and a ``mine only'' toggle (incidents they created, claimed, or resolved). \\
   \emph{Acceptance criterion:} activating any filter combination updates only the Kanban columns; the KPI summary counters continue to reflect the true, unfiltered system state.
 
-  \item[\textbf{10}] \textbf{Event notifications.} Operators receive non-blocking toast notifications for relevant events they did not personally trigger, and for local operation failures. \\
+  \item[\textbf{FR10}] \textbf{Event notifications.} Operators receive non-blocking toast notifications for relevant events they did not personally trigger, and for local operation failures. \\
   \emph{Acceptance criterion:} every failed claim, release, or resolve action produces a visible notification describing the reason for failure; no user-initiated action fails silently.
 \end{itemize}
 
 \subsection{Non-Functional Requirements}\label{non-functional-requirements}
 
 \begin{itemize}
-  \item[\textbf{1}] \textbf{No lost updates.} Concurrent modification attempts on the same incident must never silently overwrite one another. \\
+  \item[\textbf{NFR1}] \textbf{No lost updates.} Concurrent modification attempts on the same incident must never silently overwrite one another. \\
   \emph{Realized by:} optimistic locking via a \texttt{version} field, matched on every \texttt{PATCH}. \\
   \emph{Acceptance criterion:} a \texttt{PATCH} carrying a stale version is rejected with \texttt{409} and leaves the document unmodified.
 
-  \item[\textbf{2}] \textbf{Server-enforced mutual exclusion.} The claim mechanism must be enforced by the server, not merely suggested by the client interface. \\
+  \item[\textbf{NFR2}] \textbf{Server-enforced mutual exclusion.} The claim mechanism must be enforced by the server, not merely suggested by the client interface. \\
   \emph{Acceptance criterion:} a resolution request issued by an operator who does not currently hold the incident's lock is rejected with \texttt{409}, even when the request bypasses the UI entirely (e.g., sent directly to the API).
 
-  \item[\textbf{3}] \textbf{Fault tolerance of the API tier.} The loss of any single API pod must not interrupt service for connected or new operators. \\
+  \item[\textbf{NFR3}] \textbf{Fault tolerance of the API tier.} The loss of any single API pod must not interrupt service for connected or new operators. \\
   \emph{Acceptance criterion:} deleting one of the $\geq 3$ running \texttt{api} pods produces no visible downtime; remaining pods continue serving requests, and Socket.IO clients transparently reconnect to a healthy pod.
 
-  \item[\textbf{4}] \textbf{Fault tolerance of the data tier.} The loss of any single MongoDB node must not interrupt read/write availability nor lose committed data. \\
+  \item[\textbf{NFR4}] \textbf{Fault tolerance of the data tier.} The loss of any single MongoDB node must not interrupt read/write availability nor lose committed data. \\
   \emph{Realized by:} a 3-node Replica Set with automatic primary election, protected by a \texttt{PodDisruptionBudget} (\texttt{minAvailable: 2}) that prevents voluntary evictions from breaking quorum. \\
   \emph{Acceptance criterion:} terminating one of the 3 \texttt{mongo} pods triggers automatic recovery (re-election if the primary was lost) without manual intervention, and the API resumes normal operation once the probe reports readiness again.
 
-  \item[\textbf{5}] \textbf{Exactly-once background execution.} The automatic escalation task must execute exactly once per cycle across the whole cluster, regardless of how many API pods are running. \\
+  \item[\textbf{NFR5}] \textbf{Exactly-once background execution.} The automatic escalation task must execute exactly once per cycle across the whole cluster, regardless of how many API pods are running. \\
   \emph{Realized by:} Redis-based leader election with an atomically-renewed lock (Lua script, preventing the split-brain window of a naive \texttt{GET}+\texttt{PEXPIRE}). \\
   \emph{Acceptance criterion:} with $N \geq 1$ running \texttt{api} pods, a given incident is escalated exactly once (no duplicate version increments, no duplicate log entries).
 
-  \item[\textbf{6}] \textbf{Horizontal scalability.} The API tier must absorb increased load by adding replicas automatically, without manual intervention. \\
+  \item[\textbf{NFR6}] \textbf{Horizontal scalability.} The API tier must absorb increased load by adding replicas automatically, without manual intervention. \\
   \emph{Realized by:} a \texttt{HorizontalPodAutoscaler} (3--10 replicas, 80\% CPU utilization target). \\
   \emph{Acceptance criterion:} sustained CPU load above the threshold results in additional \texttt{api} pods being scheduled within the HPA's stabilization window.
 
-  \item[\textbf{7}] \textbf{Reconnection consistency.} A client that experiences a temporary disconnection (e.g., during a rolling update of the API tier) must never regress to a state older than what it displayed before disconnecting, and must recover the \emph{whole} observable state of each incident, including who currently holds its claim. \\
+  \item[\textbf{NFR7}] \textbf{Reconnection consistency.} A client that experiences a temporary disconnection (e.g., during a rolling update of the API tier) must never regress to a state older than what it displayed before disconnecting, and must recover the \emph{whole} observable state of each incident, including who currently holds its claim. \\
   \emph{Realized by:} a resynchronization-generation counter that discards any hydration response superseded by a later one, and a board snapshot that carries the claim state read from Redis rather than the MongoDB documents alone. \\
   \emph{Acceptance criterion:} rapid, repeated reconnects never leave the client displaying data fetched by an earlier, superseded hydration; and an operator who reloads the page while holding a claim still sees that claim, and retains the actions it authorizes.
 
-  \item[\textbf{8}] \textbf{Self-healing presence data.} The count of online operators must never permanently overcount stale sessions after an ungraceful pod termination. \\
+  \item[\textbf{NFR8}] \textbf{Self-healing presence data.} The count of online operators must never permanently overcount stale sessions after an ungraceful pod termination. \\
   \emph{Realized by:} deriving presence from \texttt{io.fetchSockets()} (live socket introspection across the Redis adapter) instead of a manually-maintained Redis hash, which was found during development to leak stale entries on unclean shutdowns. \\
   \emph{Acceptance criterion:} after force-terminating an API pod, the online-user count converges to the correct value without manual state cleanup.
 
-  \item[\textbf{9}] \textbf{UI eventual consistency.} A given incident must never be rendered in two mutually-exclusive Kanban columns at once, regardless of the arrival order of independent real-time events describing the same state change. \\
+  \item[\textbf{NFR9}] \textbf{UI eventual consistency.} A given incident must never be rendered in two mutually-exclusive Kanban columns at once, regardless of the arrival order of independent real-time events describing the same state change. \\
   \emph{Acceptance criterion:} resolving a claimed incident never produces a transient duplicate card appearing simultaneously in ``In Progress'' and ``Resolved'', irrespective of whether the lock-release event or the database change-stream event is delivered to the client first.
 \end{itemize}
 
 \subsection{Implementation Requirements}\label{implementation-requirements}
 
 \begin{itemize}
-  \item[\textbf{1}] The backend is implemented in Node.js, using Express for the REST API and Socket.IO for the WebSocket transport. This follows from the design need for a single event-driven runtime capable of hosting both request/response handling and long-lived WebSocket connections in the same process, which simplifies bridging MongoDB Change Stream events onto Socket.IO broadcasts.
+  \item[\textbf{I1}] The backend is implemented in Node.js, using Express for the REST API and Socket.IO for the WebSocket transport. This follows from the design need for a single event-driven runtime capable of hosting both request/response handling and long-lived WebSocket connections in the same process, which simplifies bridging MongoDB Change Stream events onto Socket.IO broadcasts.
 
-  \item[\textbf{2}] MongoDB is deployed as a genuine multi-node Replica Set, not a single-member replica set masquerading as one. A one-member replica set would be sufficient to unlock the Change Streams API, but would not exercise the replication and automatic-failover mechanisms.
+  \item[\textbf{I2}] MongoDB is deployed as a genuine multi-node Replica Set, not a single-member replica set masquerading as one. A one-member replica set would be sufficient to unlock the Change Streams API, but would not exercise the replication and automatic-failover mechanisms.
 
-  \item[\textbf{3}] Redis is present as the shared coordination point for all cross-instance mechanisms (Socket.IO Pub/Sub adapter, distributed locks, leader election). This follows directly from the design decision to keep the API tier stateless and horizontally scalable, which in turn requires an external, shared point of coordination reachable by every replica.
+  \item[\textbf{I3}] Redis is present as the shared coordination point for all cross-instance mechanisms (Socket.IO Pub/Sub adapter, distributed locks, leader election). This follows directly from the design decision to keep the API tier stateless and horizontally scalable, which in turn requires an external, shared point of coordination reachable by every replica.
 
-  \item[\textbf{4}] The system is containerized with Docker and orchestrated with Kubernetes, validated locally on Minikube. This constraint follows from the pedagogical objective of exercising orchestration-level distributed-systems mechanisms (StatefulSets, PodDisruptionBudgets, Horizontal Pod Autoscaling, liveness/readiness separation) that would not otherwise be exercised by application code alone.
+  \item[\textbf{I4}] The system is containerized with Docker and orchestrated with Kubernetes, validated locally on Minikube. This constraint follows from the pedagogical objective of exercising orchestration-level distributed-systems mechanisms (StatefulSets, PodDisruptionBudgets, Horizontal Pod Autoscaling, liveness/readiness separation) that would not otherwise be exercised by application code alone.
 
-  \item[\textbf{5}] The frontend is a Vue~3 single-page application using the Composition API. This is a project-specific implementation choice rather than an externally imposed constraint: it emerged as a consequence of the design's reliance on fine-grained reactive state derived from a continuous stream of WebSocket events.
+  \item[\textbf{I5}] The frontend is a Vue~3 single-page application using the Composition API. This is a project-specific implementation choice rather than an externally imposed constraint: it emerged as a consequence of the design's reliance on fine-grained reactive state derived from a continuous stream of WebSocket events.
 \end{itemize}
 
-\subsection{Glossary}\label{glossary}
 
-\begin{itemize}
-  \item \textbf{Claim:} the exclusive right to work on an incident, granted through a distributed lock (Redis \texttt{SET NX PX}) with a bounded time-to-live (60 seconds), renewable by its holder and readable as part of the board's state.
-  \item \textbf{Escalation:} the automatic transition of an incident from \texttt{open} to \texttt{escalated} once it has exceeded the configured SLA threshold without being resolved.
-  \item \textbf{Leader:} the single pod, among all running replicas of the \texttt{api} Deployment, elected at any given time to execute a shared background task (here, the escalation scan).
-  \item \textbf{Change Stream:} a MongoDB feature allowing a client to subscribe to a real-time feed of changes on a collection, implemented on top of the operation log (oplog) and available only on a Replica Set.
-  \item \textbf{Optimistic locking:} a concurrency-control strategy that allows unrestricted concurrent reads and detects conflicting writes at commit time via a version check, rather than serializing access up front.
-  \item \textbf{Readiness / Liveness probe:} Kubernetes-level health checks that determine, respectively, whether a pod should receive traffic and whether it should be restarted.
-  \item \textbf{Sticky session:} a load-balancing strategy, configured on the Ingress via a cookie, that routes all requests belonging to one client session to the same backend replica.
-  \item \textbf{PDB (PodDisruptionBudget):} a Kubernetes resource limiting how many replicas of a workload may be voluntarily disrupted (e.g., during a drain or rolling update) at the same time.
-\end{itemize}
-
-\subsection{Relevant Distributed System Features}
+\subsection{Relevant and Non Relevant Distributed System Features}
 \label{ds-features}
 
 \subsubsection{Transparency}
