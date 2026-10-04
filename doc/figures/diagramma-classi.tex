@@ -1,0 +1,143 @@
+% Diagramma delle classi del backend (Figura fig:class-diagram del report).
+% Sorgente TikZ autonomo, come architettura.tex: si compila a parte e il
+% report include il PDF.
+%   cd doc/figures && latexmk -pdf diagramma-classi.tex && latexmk -c diagramma-classi.tex
+% Il backend non usa classi JavaScript: le "classi" del package api sono i
+% moduli factory di api/src, le altre sono le entità del dominio raggruppate
+% per luogo in cui vive il loro stato. Attributi, TTL e operazioni vanno
+% tenuti allineati a api/src/config.js e alle rotte.
+% Larghezza naturale ~15.5 cm: oltre, ridotto a \textwidth diventa illeggibile.
+\documentclass[tikz,border=3pt]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usetikzlibrary{arrows.meta,positioning,fit,calc,shapes.multipart}
+
+\pgfdeclarelayer{bottom}
+\pgfsetlayers{bottom,main}
+
+% Stessa palette di architettura.tex: un colore per ogni luogo in cui vive
+% lo stato (Mongo, Redis, memoria del pod) e uno per i moduli applicativi.
+\definecolor{edge}{HTML}{3B4252}
+\definecolor{muted}{HTML}{5F6672}
+\definecolor{apifill}{HTML}{EEF0FA}   \definecolor{apiline}{HTML}{4B55A0}
+\definecolor{redfill}{HTML}{FBECEA}   \definecolor{redline}{HTML}{A3402F}
+\definecolor{mgofill}{HTML}{EAF4F1}   \definecolor{mgoline}{HTML}{2F7564}
+\definecolor{netfill}{HTML}{E8EEF7}   \definecolor{netline}{HTML}{3A5A8C}
+
+\tikzset{
+  font=\sffamily\scriptsize,
+  >={Stealth[length=2mm,width=1.5mm]},
+  class/.style={rectangle split, rectangle split parts=3, draw=#1line,
+                rectangle split part fill={#1fill,white,white},
+                line width=0.7pt, align=left, inner sep=2.5pt, anchor=north},
+  pkg/.style={draw=#1line, rounded corners=3pt, line width=0.7pt,
+              dash pattern=on 3pt off 1.5pt, fill=#1fill!35, inner sep=5pt},
+  pkgtitle/.style={font=\sffamily\footnotesize\bfseries, text=#1line},
+  assoc/.style={draw=edge, line width=0.7pt},
+  dep/.style={->, draw=edge!75, line width=0.6pt, dash pattern=on 3pt off 2pt},
+  mult/.style={font=\sffamily\scriptsize, text=edge, inner sep=1pt},
+  role/.style={font=\sffamily\scriptsize\itshape, text=edge, inner sep=1pt},
+}
+% Intestazione di una classe: stereotipo e nome, entrambi centrati.
+\newcommand{\head}[2]{\parbox{\linewidth}{\centering{\color{muted}\guillemotleft#1\guillemotright}\\\textbf{#2}}}
+
+\begin{document}
+\begin{tikzpicture}
+
+% ================================================================ moduli (api)
+\def\mw{2.25cm}
+\newcommand{\module}[5]{%
+  % #1 nodo, #2 x, #3 nome, #4 attributi, #5 operazioni
+  \node[class=api, text width=\mw] (#1) at (#2,10.0)
+    {\head{module}{#3}\nodepart{two}#4\nodepart{three}#5};
+}
+\module{presence}{1.25}{Presence}{}
+  {+onConnect()\\+onDisconnect()}
+\module{auth}{3.8}{AuthRouter}{}
+  {+register()\\+login(): JWT}
+\module{incidents}{8.9}{IncidentsRouter}{}
+  {+create(title)\\+snapshot()\\+update(status,\\\hspace*{1em}version)}
+\module{changes}{6.35}{ChangeStream}
+  {$-$resumeToken\\$-$healthy: Boolean}
+  {+start()\\+isHealthy()\\+close()}
+\module{claims}{11.45}{ClaimsRouter}{}
+  {+claim(id)\\+release(id)}
+\module{escalation}{14.0}{EscalationTask}
+  {period: 10\,s\\SLA: 5\,min}
+  {$-$tick()}
+
+% Stato di connessione: vive nella memoria del pod, quindi nel package api.
+\node[class=net, text width=\mw] (session) at (1.25,7.55)
+  {\head{connection}{OnlineSession}\nodepart{two}username: String\nodepart{three}\textit{exists while its}\\\textit{WebSocket is open}};
+
+\node[pkgtitle=api, anchor=south west] (apititle) at ($(presence.north west)+(0,0.1)$)
+  {\texttt{api} replica \textmd{(every pod runs one instance of each module)}};
+\begin{pgfonlayer}{bottom}
+  \node[pkg=api, fit=(apititle)(presence)(escalation)(incidents)(changes)(session)] (apipkg) {};
+\end{pgfonlayer}
+
+% ================================================================ entità
+\node[class=mgo, text width=2.55cm] (user) at (2.0,4.05)
+  {\head{document}{User}\nodepart{two}username: String \{unique\}\\passwordHash: String\\createdAt: Date\nodepart{three}};
+
+\node[class=mgo, text width=3.3cm] (incident) at (6.9,4.05)
+  {\head{document}{Incident}\nodepart{two}title: String \{$\leq$ 200 chars\}\\status: \{open, escalated, closed\}\\createdBy: String\\closedBy: String [0..1]\\version: Integer\\updatedAt: Date\\{\color{muted}/lockedBy: String [0..1]}\\{\color{muted}/lockTtl: ms [0..1]}\\{\color{muted}\textit{(derived, snapshot only)}}\nodepart{three}};
+
+\node[class=red, text width=2.3cm] (claim) at (11.65,4.05)
+  {\head{Redis key}{Claim}\nodepart{two}lock:incident:\textit{id}\\owner: String\\TTL: 60\,s\nodepart{three}\textit{SET NX PX;}\\\textit{renew, release, read}\\\textit{via Lua}};
+
+\node[class=red, text width=2.3cm] (lease) at (14.2,4.05)
+  {\head{Redis key}{LeaderLease}\nodepart{two}leader:escalation\\holder: podId\\TTL: 15\,s\nodepart{three}\textit{SET NX PX;}\\\textit{renewed via Lua}};
+
+\node[pkgtitle=mgo, anchor=south west] (mgotitle) at ($(user.north west)+(0,0.1)$) {MongoDB \textmd{(durable)}};
+\node[pkgtitle=red, anchor=south west] (redtitle) at ($(claim.north west)+(0,0.1)$) {Redis \textmd{(self-expiring)}};
+\begin{pgfonlayer}{bottom}
+  \node[pkg=mgo, fit=(mgotitle)(user)(incident)] (mgopkg) {};
+  \node[pkg=red, fit=(redtitle)(claim)(lease)] (redpkg) {};
+\end{pgfonlayer}
+
+% ================================================================ associazioni
+% User -- Incident: chi lo crea e chi lo chiude.
+\coordinate (ui1) at ($(user.north)+(0,-1.05)$);
+\coordinate (ui2) at ($(user.north)+(0,-1.75)$);
+\draw[assoc] (ui1 -| user.east) -- node[role, above=1pt] {creates} (ui1 -| incident.west);
+\node[mult, anchor=south west] at (ui1 -| user.east) {1};
+\node[mult, anchor=south east] at (ui1 -| incident.west) {0..*};
+\draw[assoc] (ui2 -| user.east) -- node[role, below=1pt] {closes} (ui2 -| incident.west);
+\node[mult, anchor=north west] at (ui2 -| user.east) {0..1};
+\node[mult, anchor=north east] at (ui2 -| incident.west) {0..*};
+
+% Incident -- Claim: al più un claim per incidente.
+\coordinate (ic) at ($(claim.north)+(0,-1.05)$);
+\draw[assoc] (ic -| incident.east) -- node[role, above=1pt] {locked by} (ic -| claim.west);
+\node[mult, anchor=north west] at (ic -| incident.east) {1};
+\node[mult, anchor=north east] at (ic -| claim.west) {0..1};
+
+% User -- Claim: il proprietario del lock, instradata sotto le entità.
+\coordinate (low) at ($(mgopkg.south)+(0,-0.35)$);
+\draw[assoc] (user.south) -- (user.south |- low) -- node[role, below=1pt, pos=0.5] {holds} (low -| claim.south) -- (claim.south);
+\node[mult, anchor=north west] at (user.south) {1};
+\node[mult, anchor=north east] at (claim.south) {0..*};
+
+% User -- OnlineSession: una sessione per ogni connessione aperta.
+\draw[assoc] (session.south) -- node[role, right=2pt, pos=0.3] {is online via} (session.south |- user.north);
+\node[mult, anchor=north west] at (session.south) {0..*};
+\node[mult, anchor=south west] at (session.south |- user.north) {1};
+
+% ================================================================ dipendenze
+\draw[dep] (presence.south) -- node[role, right=1pt] {fetchSockets()} (session.north);
+\draw[dep] (auth.south) -- ($(user.north)+(0.85,0)$);
+\draw[dep] (incidents.south) -- ($(incident.north)+(1.2,0)$);
+\draw[dep] ($(incidents.south)+(0.6,0)$) -- node[role, pos=0.3, sloped, above=0pt] {checks owner} ($(claim.north)+(-0.6,0)$);
+\draw[dep] (changes.south) -- node[role, right=1pt, pos=0.45] {observes} (changes.south |- incident.north);
+\draw[dep] (claims.south) -- ($(claim.north)+(0.15,0)$);
+\draw[dep] ($(escalation.south)+(-0.55,0)$) -- node[role, pos=0.3, sloped, above=0pt] {escalates} ($(incident.north)+(1.55,0)$);
+\draw[dep] (escalation.south) -- node[role, left=1pt, pos=0.4] {competes for} (lease.north);
+
+% ================================================================ legenda
+\coordinate (leg) at ($(apipkg.west |- low)+(0,-0.7)$);
+\draw[assoc] (leg) -- ++(0.7,0) node[right, mult] {association (with multiplicities)};
+\draw[dep] ($(leg)+(4.4,0)$) -- ++(0.7,0) node[right, mult] {dependency: the module reads or writes that state};
+
+\end{tikzpicture}
+\end{document}
