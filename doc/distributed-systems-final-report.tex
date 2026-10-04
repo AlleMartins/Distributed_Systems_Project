@@ -461,7 +461,16 @@ A third case has no originating pod at all: when a claim lock simply \emph{expir
  
 \section{Implementation}\label{implementation}
 
-This section documents the technology-dependent choices made while translating the design of \cref{design} into a running system. Each subsection maps directly to one of the implementation dimensions identified in the project template and is grounded in the actual source code of the three project directories (\texttt{api/}, \texttt{web/}, \texttt{k8s/}).
+\subsection{Technology Stack}\label{tech-stack}
+
+\begin{itemize}
+  \item \textbf{Frontend:} a single-page application in Vue~3 (Composition API, \texttt{<script setup>}), built with Vite. \texttt{socket.io-client} keeps the real-time channel, Chart.js (through \texttt{vue-chartjs}) draws the dashboard chart, and \texttt{vue-toastification} shows the notifications.
+  \item \textbf{Backend:} Node.js~20 with Express~5 for the REST API and Socket.IO~4 for the WebSocket server, extended across pods by \texttt{@socket.io/redis-adapter}. Authentication uses \texttt{jsonwebtoken} and \texttt{bcryptjs}; the stores are reached through the official \texttt{mongodb} and \texttt{redis} (node-redis) drivers.
+  \item \textbf{Database:} MongoDB~6 as a 3-member replica set, the durable store of incidents and users and the source of the Change Streams; Redis~7 as a single in-memory instance for the claim locks, the leader lease and the Socket.IO Pub/Sub.
+  \item \textbf{Distributed infrastructure:} Kubernetes, validated on Minikube: Deployments for \texttt{api}, \texttt{web} and Redis, a StatefulSet with a headless Service for MongoDB, a one-shot Job for the replica-set initialization, an ingress-nginx Ingress with cookie affinity, a HorizontalPodAutoscaler fed by \texttt{metrics-server}, PodDisruptionBudgets and a Secret for the JWT key.
+  \item \textbf{Containerisation:} Docker. The \texttt{api} image is based on \texttt{node:20-alpine} with production dependencies only; the \texttt{web} image is a multi-stage build that compiles the bundle on \texttt{node:20-alpine} and serves it with \texttt{nginx:alpine}. MongoDB and Redis use the official \texttt{mongo:6} and \texttt{redis:7} images.
+  \item \textbf{API:} REST over HTTP with JSON bodies under \texttt{/api} (authentication, incidents, claims, health probes), authenticated with a \texttt{Bearer} JWT; server-to-client events over Socket.IO, on WebSocket with a long-polling fallback.
+\end{itemize}
 
 \subsection{Network Protocols}\label{network-protocols}
 
@@ -477,7 +486,7 @@ Two application-level protocols coexist, each chosen for a specific interaction 
   \item \texttt{PATCH /api/incidents/:id} --- resolve an incident (with optimistic-locking version check and server-side lock verification).
 \end{itemize}
 %
-HTTP was chosen because every mutation requires an unambiguous, synchronous success-or-failure response (e.g., ``did I get the lock or not?''), which request/response semantics provide naturally. Two additional endpoints serve as Kubernetes health probes: \texttt{GET /api/health} (liveness, shallow) and \texttt{GET /api/ready} (readiness, deep --- pings both MongoDB and Redis, and additionally reports \texttt{503} if the pod's own Change Stream is not currently active).
+HTTP was chosen because every mutation requires an unambiguous, synchronous success-or-failure response (e.g., ``did I get the lock or not?''), which request/response semantics provide naturally. 
 
 \paragraph{WebSocket (via Socket.IO)} is used for all \textbf{event} (notification) interactions from the server to connected clients. The Socket.IO library negotiates a WebSocket upgrade after an initial HTTP handshake, falling back to HTTP long-polling if WebSocket is unavailable. The server emits five event types:
 %
@@ -488,7 +497,7 @@ HTTP was chosen because every mutation requires an unambiguous, synchronous succ
   \item \texttt{resync\_required} --- asks the pod's own clients to re-hydrate from \texttt{GET /api/incidents}, emitted when the pod knows it has lost a segment of the change feed and cannot replay it (\cref{fault-tolerance}).
 \end{itemize}
 %
-WebSocket was chosen over polling because the design requires near-real-time propagation of every state change to every connected client; a polling strategy would either waste bandwidth (short intervals, many no-op responses) or introduce unacceptable latency (long intervals, stale dashboards).
+WebSocket was chosen over polling because the design requires near-real-time propagation of every state change to every connected client.
 
 \paragraph{Redis protocol (RESP).} The \texttt{api} pods communicate with Redis using the native Redis Serialization Protocol over TCP, mediated by the \texttt{redis} npm package (v6). This includes standard commands (\texttt{SET}, \texttt{GET}, \texttt{DEL}, \texttt{PING}) and Lua script evaluation (\texttt{EVAL}) for atomic lock operations.
 
@@ -505,47 +514,29 @@ WebSocket was chosen over polling because the design requires near-real-time pro
   \item \textbf{Redis $\leftrightarrow$ driver:} Redis values are plain UTF-8 strings (usernames, pod identifiers); no structured serialization is needed because each key holds a single scalar value.
 \end{itemize}
 %
-JSON was chosen for simplicity, native support in both JavaScript runtimes (Node.js and the browser), and human readability during debugging. The overhead of JSON over a binary format like Protocol Buffers is negligible at the expected message volumes of a SOC dashboard.
-
 \subsection{Database Querying}\label{database-querying}
 
-The system uses \textbf{MongoDB}, a document-oriented NoSQL database, queried through the official Node.js driver's fluent API rather than through a raw query language.
+MongoDB is queried through the fluent API of the official Node.js driver.
 
-\paragraph{Write operations.} Three write patterns are used:
+\paragraph{Writes.}
 %
 \begin{itemize}
-  \item \texttt{insertOne(\{...\})} for incident creation, which atomically assigns a \texttt{version: 1} and an \texttt{updatedAt} timestamp;
-  \item \texttt{updateOne(\{\_id, version\}, \{\$set: ..., \$inc: \{version: 1\}\})} for single-incident resolution, implementing the optimistic-locking pattern: the \texttt{version} field in the query filter ensures the update only applies if no concurrent modification has incremented it since the client last read the document;
-  \item \texttt{updateMany(\{status: 'open', updatedAt: \{\$lt: threshold\}\}, ...)} for the background escalation task, which bulk-transitions all stale open incidents to \texttt{escalated} in a single round-trip.
+  \item \texttt{insertOne} creates an incident with \texttt{status: 'open'}, \texttt{version: 1} and \texttt{updatedAt}, and registers a user; the uniqueness of usernames is enforced by a unique index.
+  \item \texttt{updateOne(\{\_id, version, status: \{\$in: allowed sources\}\}, \{\$set: ..., \$inc: \{version: 1\}\})} implements optimistic locking: the update applies only if nobody has changed the document since the client read it and the transition is allowed from its current status.
+  \item \texttt{updateMany(\{status: 'open', updatedAt: \{\$lt: threshold\}\}, ...)} escalates every overdue incident in a single round-trip.
 \end{itemize}
 
-\paragraph{Read operations.} A single MongoDB read pattern is used: \texttt{find(\{\}).sort(\{updatedAt: -1\}).toArray()}, which retrieves the entire incidents collection sorted by last-update time. Because a claim lives in Redis and not in the document, this result alone would describe only \emph{half} of each incident's observable state, so the handler then reads the corresponding lock keys from Redis and merges the holder and the remaining TTL into each returned document. The merge is what makes the REST snapshot and the subsequent event stream describe the same state for every client, no matter when it connects; the two are read in that order (documents first, locks second) so that a lock acquired in between is reported as held rather than omitted. The enriched snapshot is fetched on connection, on every reconnection and on \texttt{resync\_required}; after hydration, the client relies exclusively on the event feed.
+\paragraph{Reads.} The board snapshot is \texttt{find(\{\}).sort(\{updatedAt: -1\})}, enriched with the holder and remaining TTL of each claim read from Redis, so that every client hydrates to the same state whenever it connects; documents are read before locks, so a lock acquired in between is reported rather than lost. The other reads are point lookups: the user at login, the existence of an incident before any claim, and its current status and version after a failed update, to tell a version conflict from a forbidden transition.
 
-\paragraph{Change Streams.} The \texttt{watch([], \{fullDocument: 'updateLookup'\})} call opens a tailable cursor on the collection's oplog, streaming every insert and update as a structured change event that includes the full post-image of the document. This eliminates the need for any polling logic and provides the reactive bridge between the data layer and the real-time notification layer. Since this cursor is the \emph{only} channel through which a client learns of anything after hydration, its failure is treated as a first-class fault rather than left to chance: the \texttt{\_id} of each delivered event is retained as a resume token and passed as \texttt{resumeAfter} when the cursor is rebuilt after an error, and the pod declares itself not-ready for as long as no cursor is open (\cref{fault-tolerance}). The MongoDB driver already retries \emph{resumable} errors internally (a primary failover, for instance), so the application-level handler only ever runs for the non-resumable remainder.
+\paragraph{Change Streams.} \texttt{watch([], \{fullDocument: 'updateLookup'\})} streams every insert and update with the full document, replacing any polling. Each event's \texttt{\_id} is kept as a resume token and passed as \texttt{resumeAfter} when the cursor is rebuilt; the driver already retries resumable errors such as a primary failover, so the application only handles the rest (\cref{fault-tolerance}).
 
-\paragraph{Redis querying.} Redis is queried with single-key commands (\texttt{SET NX PX}, \texttt{GET}, \texttt{DEL}) and three Lua scripts executed via \texttt{EVAL}:
+\paragraph{Redis.} Single-key commands (\texttt{SET NX PX}, \texttt{GET}) plus three Lua scripts, which Redis executes atomically:
 %
 \begin{itemize}
-  \item \texttt{RENEW\_LOCK\_SCRIPT}: atomically checks that the value of a key matches an expected owner and, only if so, extends its TTL --- preventing the split-brain window that a non-atomic \texttt{GET}+\texttt{PEXPIRE} sequence would introduce. It is used both to renew the leadership mandate (owner = the pod identifier) and to renew a claim on behalf of the operator who already holds it;
-  \item \texttt{RELEASE\_LOCK\_SCRIPT}: atomically checks that the value of a claim lock matches the releasing operator and, only if so, deletes the key --- preventing an operator from accidentally deleting a lock that has since been acquired by someone else after the original lock expired;
-  \item \texttt{READ\_LOCKS\_SCRIPT}: the only multi-key script, used to hydrate the board snapshot. It iterates over the lock keys of all incidents and returns, for each key that actually exists, the triple (key, owner, remaining TTL). Reading owner and TTL inside a single \texttt{EVAL} is what guarantees they refer to the same instant: an equivalent \texttt{GET}+\texttt{PTTL} pair issued from the application could observe an owner that has already expired by the time its TTL is read. It also collapses what would otherwise be one round-trip per incident into one, so the cost of hydration does not grow with the size of the board.
+  \item \texttt{RENEW\_LOCK\_SCRIPT} extends a key's TTL only if it still belongs to the caller; it renews both the leadership and the claim of its current holder.
+  \item \texttt{RELEASE\_LOCK\_SCRIPT} deletes a claim only if it still belongs to the caller, so an expired lock taken over by someone else is never deleted by mistake.
+  \item \texttt{READ\_LOCKS\_SCRIPT} returns owner and remaining TTL of every existing lock in one call: the two values refer to the same instant, and hydration costs one round-trip regardless of the size of the board.
 \end{itemize}
-%
-All three scripts exploit Redis's single-threaded execution model: no other command can interleave between the \texttt{GET} check and the \texttt{PEXPIRE}/\texttt{DEL}/\texttt{PTTL} action within the same \texttt{EVAL} invocation.
-
-\subsection{Authentication}\label{impl-authentication}
-
-\textbf{A single-factor, stateless authentication mechanism is implemented.} An operator first registers via \texttt{POST /api/auth/register} with a username and a password (minimum 8 characters); the password is hashed with \texttt{bcrypt} (10 salt rounds) before being stored in the \texttt{users} MongoDB collection, which carries a unique index on \texttt{username} to prevent duplicate registrations even under concurrent requests from different \texttt{api} pods. \texttt{POST /api/auth/login} verifies the submitted password against the stored hash and, on success, issues a JWT (\texttt{jsonwebtoken}, 12-hour expiry) whose payload identifies the username; both endpoints return the same generic error message for a non-existent user and for a wrong password, to avoid leaking which usernames are registered.
-
-The JWT is signed with a secret (\texttt{JWT\_SECRET}) injected into every \texttt{api} pod from the same Kubernetes \texttt{Secret} (\texttt{jwt-secret.yaml}). This is what keeps authentication compatible with the system's horizontally-scaled, stateless design: no session state is held by any individual pod, so a token issued by one replica can be verified by any other replica that later receives a request from the same client, with no sticky session required. On the client side, the token is attached as an \texttt{Authorization: Bearer} header on every REST call and as \texttt{socket.handshake.auth.token} on the Socket.IO handshake; an Express middleware (\texttt{authenticate}) and a Socket.IO middleware (\texttt{io.use()}) both verify it independently and reject the request/handshake if it is missing, malformed, or expired.
-
-Identity derived from the verified token, not from client-supplied data, is used everywhere an operator's identity previously had to be trusted: \texttt{createdBy} on incident creation, the lock owner on claim/release, and \texttt{closedBy} on resolution are all now read from \texttt{req.user.username} (REST) or \texttt{socket.data.username} (Socket.IO) rather than from the request body or handshake payload --- closing an impersonation gap where a client could previously act, claim, or resolve incidents under any username of its choosing simply by asserting it. This remains a deliberately scoped simplification: it is single-factor authentication (username and password are both ``something you know'', not a second independent factor), and there is no password-reset flow, account lockout, or brute-force rate limiting on \texttt{/api/auth/login} for the current iteration.
-
-\subsection{Authorization}\label{impl-authorization}
-
-\textbf{No role-based or attribute-based access control is implemented.} All authenticated operators share the same implicit role and can perform every available action (create, claim, release, resolve). There is, however, one narrow form of \textbf{capability-based authorization} enforced server-side: possession of an incident's Redis lock functions as the sole authorization token for resolving or releasing that specific incident.
-
-Concretely, the \texttt{PATCH /api/incidents/:id} handler checks the current lock owner against the authenticated username of the caller (\texttt{req.user.username}, derived from the verified JWT) before allowing the update to proceed; if they do not match (i.e., someone other than the lock holder is attempting to resolve), the request is rejected with HTTP 409, regardless of what the client UI displays. Similarly, the \texttt{DELETE /api/incidents/:id/claim} handler uses the \texttt{RELEASE\_LOCK\_SCRIPT} to ensure only the lock holder can release it. This is still authorization by \emph{possession of a token} (the lock's stored value) rather than a distinct RBAC/ABAC layer, but that stored value is, since the authentication work described in \cref{impl-authentication}, itself an authenticated identity rather than an arbitrary client-declared string.
 
 \subsection{Technological Details}\label{technological-details}
 
@@ -614,57 +605,6 @@ The Kubernetes manifests in \texttt{k8s/} define the following resources, all de
   %
   Cookie-based sticky sessions are enabled via annotations (\texttt{nginx.ingress.kubernetes.io/affinity: cookie}, cookie name \texttt{route}, 48-hour expiry) specifically because Socket.IO's HTTP long-polling fallback requires successive requests within the same handshake to reach the same backend pod.
 \end{itemize}
-
-\subsubsection{Concurrency Control Implementation}
-
-Two concurrency control mechanisms are implemented, each targeting a different failure mode:
-%
-\begin{itemize}
-  \item \textbf{Distributed lock (Redis \texttt{SET NX PX}):} used for incident claiming. The lock key follows the pattern \texttt{lock:incident:\{id\}} and its duration comes from a single \texttt{CLAIM\_TTL} constant (60~seconds) shared by every site that acquires, renews or reports a claim --- a duplicated and later divergent TTL would make locks expire sooner than the clients believe. Acquisition uses a single \texttt{SET key value NX PX CLAIM\_TTL} command, which is atomic by definition (Redis is single-threaded).
-
-  A failed \texttt{SET NX} does not immediately imply a conflict, because the existing lock may belong to the caller: the handler therefore falls through to \texttt{RENEW\_LOCK\_SCRIPT}, and only a lock owned by \emph{somebody else} yields \texttt{409}. Claiming is thus \textbf{idempotent for the current holder}, who re-acquires and extends their own claim instead of being locked out of it. Renewal goes through the Lua script rather than a bare \texttt{PEXPIRE} for the usual reason: between a check and an unconditional extension the lock could expire and be taken by another analyst, and the renewal would then prolong \emph{their} claim.
-
-  Release uses a Lua script (\texttt{RELEASE\_LOCK\_SCRIPT}) that conditionally deletes the key only if the stored value still matches the releasing operator, preventing a late release from accidentally removing someone else's subsequently-acquired lock. The same script governs the release performed inside the \texttt{PATCH} handler, for every target status rather than only for \texttt{closed}.
-
-  \item \textbf{Optimistic locking (MongoDB version field):} used for incident resolution. Every incident document carries a \texttt{version} integer, initialized to~1 on creation and incremented atomically on every update via \texttt{\$inc: \{version: 1\}}. The \texttt{PATCH} handler includes the client-supplied \texttt{version} in the query filter of the \texttt{updateOne} call; if the version has been incremented since the client last read the document (indicating a concurrent modification), the \texttt{matchedCount} is 0 and the request is rejected with HTTP~409 without modifying the document.
-\end{itemize}
-
-\subsubsection{Leader Election Implementation}
-
-The background escalation task must execute exactly once per cycle cluster-wide, regardless of how many \texttt{api} pods are running. Leadership is implemented as a Redis key (\texttt{leader:escalation}) with a 15-second TTL:
-%
-\begin{itemize}
-  \item Every 10~seconds, each pod attempts \texttt{SET leader:escalation <podId> NX PX 15000}. If no leader exists, one pod succeeds and becomes leader.
-  \item If the \texttt{SET NX} fails (another pod is already leader), the pod attempts to \emph{renew} the lock using the \texttt{RENEW\_LOCK\_SCRIPT} Lua script, which atomically verifies ownership and extends the TTL only if the stored value matches the current pod's identifier. This prevents the split-brain scenario where a non-atomic \texttt{GET}+\texttt{PEXPIRE} would allow a pod to extend a lock that has already expired and been acquired by another pod in the interval between the two commands.
-  \item Only the pod that holds (or has just acquired) the leadership key executes the escalation query (\texttt{updateMany} on stale open incidents). If the leader pod crashes, the key expires after at most 15~seconds and another pod takes over on the next 10-second cycle.
-\end{itemize}
-
-\subsubsection{Real-Time Propagation Implementation}
-
-Two propagation channels coexist, deliberately separated based on whether the originating change is persisted in MongoDB:
-%
-\begin{itemize}
-  \item \textbf{Persistent changes} (insert, update of incident documents) are propagated via \textbf{MongoDB Change Streams}. Each \texttt{api} pod opens its own independent change-stream cursor (\texttt{db.collection('incidents').watch([], \{fullDocument: 'updateLookup'\})}) and emits the change event to its own locally-connected clients via \texttt{io.local.emit('incident\_update', change)}. The \texttt{local} modifier is critical: since every pod independently receives the same change event from MongoDB, using \texttt{io.emit()} would cause the event to also cross pod boundaries through the Redis adapter, resulting in duplicate delivery to clients connected to other pods.
-
-  \item \textbf{Ephemeral changes} (lock acquired, lock released, presence changed) are propagated via \textbf{Socket.IO broadcasts through the Redis adapter}. Since only the one pod that handled the originating REST request knows the change happened (no MongoDB document was modified), \texttt{io.emit()} is used, which the Redis adapter propagates to all pods, ensuring all connected clients are notified regardless of which pod they are connected to.
-\end{itemize}
-%
-An \texttt{incident\_unlocked} broadcast is emitted only when \texttt{RELEASE\_LOCK\_SCRIPT} reports that a lock was genuinely deleted, never unconditionally after a release attempt. Emitting it regardless was a defect in an earlier iteration: if the caller's claim had already expired and been re-acquired by a different analyst, the broadcast instructed every client to clear \texttt{lockedBy} while Redis still held a perfectly valid lock for the new owner, who consequently lost the action buttons on a ticket they legitimately held.
-
-Neither channel can announce a lock's \emph{natural expiry}, since no pod is involved when a TTL elapses; that case is handled client-side (\cref{client-state}).
-
-\subsubsection{Client-Side State Management}\label{client-state}
-
-The Vue.js client maintains a single reactive \texttt{incidents} array that serves as the client's local copy of the system state. This array is:
-%
-\begin{itemize}
-  \item \textbf{Hydrated} on every (re)connection, and on every \texttt{resync\_required}, by fetching \texttt{GET /api/incidents}. Each fetch increments a \emph{resynchronization-generation} counter and applies its result only if it is still the most recent one, so that a slow response can never overwrite a fresher snapshot (NFR7). The counter is per-resynchronization rather than per-connection deliberately: two hydrations can now be in flight within a single connection (a reconnect immediately followed by a server-requested resync), and a per-connection counter would let both pass the staleness check;
-  \item \textbf{Incrementally updated} by the five Socket.IO event handlers (\texttt{incident\_update}, \texttt{incident\_locked}, \texttt{incident\_unlocked}, \texttt{users\_update}, \texttt{resync\_required});
-  \item \textbf{Locally expired} for claims: every lock the client learns about --- whether from a hydration (\texttt{lockTtl}) or from an \texttt{incident\_locked} event (\texttt{ttl}) --- schedules a timer that clears \texttt{lockedBy} once the TTL elapses, unless a newer event for that incident has replaced the timer in the meantime. The timer is the client's only way to observe an expiry, since Redis lets the key vanish without telling anyone (\cref{interaction}); it verifies that the owner is still the one it was scheduled for before clearing, so a claim renewed or re-acquired in the interim is not erased. All timers are discarded on hydration and on logout, so they can never outlive the state they describe;
-  \item \textbf{Filtered} through a chain of \texttt{computed} properties (\texttt{filteredIncidents} $\to$ \texttt{kanbanOpen}, \texttt{kanbanInProgress}, \texttt{kanbanEscalated}, \texttt{kanbanResolved}) that react to search text, the ``escalated only'' toggle, and the ``mine only'' toggle. Critically, the KPI counters (\texttt{totalIncidents}, \texttt{openIncidents}, etc.) read from the unfiltered \texttt{incidents} array, so they always reflect the true global state regardless of active filters (FR9).
-\end{itemize}
-%
-The \texttt{incident\_update} handler merges persistent state changes (from the Change Stream) with ephemeral lock state (from \texttt{incident\_locked}/\texttt{incident\_unlocked}) by preserving the current \texttt{lockedBy} value when updating a document. This prevents the race condition described in NFR9, where a lock-release event and a database change-stream event for the same incident could arrive in either order and, without this merge logic, cause the incident to appear in two columns simultaneously.
 
 \section{Validation}\label{validation}
 
