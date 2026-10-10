@@ -730,11 +730,29 @@ This section describes the application from the operator's point of view, assumi
 
 \subsection{Accessing the Board}\label{ug-login}
 
-A first-time operator clicks ``Registrati'' on the login card, chooses a username and a password of at least 8 characters, and is brought back to the login form. Logging in with those credentials (``Accedi'') opens the dashboard and establishes the real-time connection in the background; wrong credentials are rejected with an inline error. The session survives a page reload and ends when the tab is closed, when the operator clicks ``Esci'' in the header, or after 12~hours.
+A first-time operator clicks ``Registrati'' on the login card, chooses a username and a password of at least 8 characters, and is brought back to the login form. Logging in with those credentials (``Accedi'') opens the dashboard and establishes the real-time connection in the background; wrong credentials are rejected with an inline error. The session survives a page reload and ends when the tab is closed, when the operator clicks ``Esci'' in the header, or after 12~hours. Both forms are shown in \cref{fig:ug-auth}.
+
+\begin{figure}[htbp]
+  \centering
+  % Ritaglio (trim) del solo sfondo vuoto attorno alla card; i PNG sono a 144 dpi.
+  \includegraphics[width=0.48\textwidth,trim=170 110 180 105,clip]{figures/login.png}\hfill
+  \includegraphics[width=0.48\textwidth,trim=120 135 140 90,clip]{figures/creazione-accoutn.png}
+  \caption{Login form (left) and registration form (right).}
+  \label{fig:ug-auth}
+\end{figure}
 
 \subsection{Dashboard Overview}\label{ug-dashboard}
 
-The dashboard is organized in four rows:
+The dashboard is organized in four rows, the first three of which are shown in \cref{fig:ug-dashboard}:
+
+\begin{figure}[htbp]
+  \centering
+  % Il trim toglie in alto le schede, la barra degli indirizzi e i preferiti del browser, ai lati i margini vuoti (PNG a 72 dpi: 1 px = 1 bp).
+  \includegraphics[width=\textwidth,trim=120 0 140 110,clip]{figures/board.png}
+  \caption{Upper part of the dashboard: header with the live-sync indicator, KPI cards, status chart, creation form and filters.}
+  \label{fig:ug-dashboard}
+\end{figure}
+
 %
 \begin{enumerate}
   \item \textbf{KPI cards}: Total, Open, Escalated and Resolved tickets (by status, whether claimed or not) and Users Online, the number of distinct operators currently connected.
