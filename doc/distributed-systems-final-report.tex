@@ -576,7 +576,7 @@ The \texttt{api} Dockerfile copies \texttt{package*.json} and runs \texttt{npm c
 
 \subsubsection{Orchestration (Kubernetes)}\label{orchestration}
 
-\Cref{tab:manifests} summarizes the manifests in \texttt{k8s/}, all deployed in the \texttt{app} namespace; the reasons behind probes, PodDisruptionBudgets and sticky sessions are given in \cref{infrastructure,fault-tolerance,availability}, and the order in which the manifests are applied in \cref{deploying-manifests}.
+\Cref{tab:manifests} summarizes the manifests in \texttt{k8s/}, all deployed in the \texttt{app} namespace; the reasons behind probes, PodDisruptionBudgets and sticky sessions are given in \cref{infrastructure,fault-tolerance,availability}, and how they are applied in \cref{deploying-manifests}.
 
 Two values are tied to each other rather than to a design choice. The readiness window of \texttt{api} (5\,s $\times$ 3) is shorter than the 20\,s after which a pod with a broken Change Stream evicts its clients, so the pod has left the endpoints before they reconnect. The \texttt{preStop} of \texttt{web} keeps a terminating pod serving for 5\,s while its removal from the endpoints propagates: without it, \texttt{maxUnavailable: 0} would preserve the capacity during a rollout but not prevent the requests refused in that window.
 
@@ -666,83 +666,63 @@ Checked directly in the browser, as they involve no distributed mechanism:
 \section{Deployment}\label{deployment}
 \subsection{Prerequisites}\label{prerequisites}
 
-Where a version is given it is a minimum imposed by the project's dependencies; the procedure was developed on Docker~29.8, Minikube~1.39, kubectl~1.37 and Node.js~22.13.
-
 \begin{itemize}
-  \item \textbf{Docker Desktop} (or Docker Engine), on which Minikube's \texttt{docker} driver, assumed throughout, runs the cluster node. The images are built inside Minikube's own daemon (\cref{building-images}): the host only provides the \texttt{docker} client.
-  \item \textbf{Minikube}, for the single-node cluster and its \texttt{ingress} and \texttt{metrics-server} addons.
-  \item \textbf{kubectl}, within one minor version of the Kubernetes release that Minikube provisions (version-skew policy); \texttt{minikube kubectl --} downloads a matching client.
+  \item \textbf{Docker Desktop} (or Docker Engine)
+  \item \textbf{Minikube}
+  \item \textbf{kubectl}
   \item \textbf{Node.js} 20.19+ or 22.12+, with npm, only to run the API or the frontend outside containers. The bounds come from the MongoDB driver~7 (\texttt{>=20.19.0}) and Vite~8 (\texttt{\textasciicircum 20.19.0 || >=22.12.0}).
 \end{itemize}
 
 \subsection{Cluster Setup}\label{cluster-setup}
 
-\paragraph{Cluster and namespace.}
+The cluster runs in a dedicated Minikube profile, \texttt{incident-board}, which every \texttt{minikube} command must name; \texttt{kubectl} follows it on its own, since \texttt{minikube start} makes it the current context.
 %
 \begin{verbatim}
-  minikube start --driver=docker --cpus=4 --memory=4g
-  minikube addons enable ingress          # Nginx Ingress controller
-  minikube addons enable metrics-server   # CPU metrics for the HPA
+  minikube start -p incident-board
+  minikube addons enable ingress -p incident-board
+  minikube addons enable metrics-server -p incident-board
   kubectl create namespace app
 \end{verbatim}
-
-\paragraph{Reaching \texttt{board.local}.} The Ingress matches the hostname \texttt{board.local}, which the host must resolve to an address where the Ingress controller listens.
-
-\emph{Linux.} The node's IP is routable from the host: add \texttt{<minikube-ip>  board.local} to \texttt{/etc/hosts} (as administrator), with the output of \texttt{minikube ip}.
-
-\emph{macOS with the \texttt{docker} driver.} The node runs inside Docker Desktop's virtual machine and its IP is not routable; \texttt{minikube tunnel} does not help either, since it exposes only \texttt{LoadBalancer} Services and the addon's controller is a \texttt{NodePort} one. The controller is reached through a port-forward, kept running in a separate terminal, with \texttt{127.0.0.1  board.local} in \texttt{/etc/hosts}:
 %
-\begin{verbatim}
-  kubectl port-forward -n ingress-nginx \
-          svc/ingress-nginx-controller 18080:80
-\end{verbatim}
-%
-The browser still sends \texttt{Host: board.local}, which the Ingress rule matches; on this platform every URL of the report takes the port explicitly, \texttt{http://board.local:18080}.
+The \texttt{ingress} addon installs the Nginx Ingress controller; \texttt{metrics-server} provides the CPU metrics without which the HPA's target stays \texttt{<unknown>} and \texttt{api} never scales.
 
 \subsection{Building the Container Images}\label{building-images}
 
-Since the \texttt{api} and \texttt{web} manifests set \texttt{imagePullPolicy: Never}, both images (\cref{technological-details}) must be built inside Minikube's Docker daemon, from the project root and in the same shell that ran \texttt{eval}:
+Since the \texttt{api} and \texttt{web} manifests set \texttt{imagePullPolicy: Never}, both images (\cref{technological-details}) must be built inside Minikube rather than on the host. From the project root:
 %
 \begin{verbatim}
-  eval $(minikube docker-env)
-  docker build -t api:latest ./api
-  docker build -t web:latest ./web
-  docker images | grep -E 'api|web'    # both images listed
+  minikube image build -t api:latest ./api -p incident-board
+  minikube image build -t web:latest ./web -p incident-board
 \end{verbatim}
 %
 \texttt{mongo:6} and \texttt{redis:7} are official images, pulled by Kubernetes on first deployment.
 
 \subsection{Deploying the Kubernetes Manifests}\label{deploying-manifests}
 
-Every manifest declares the \texttt{app} namespace. They are applied in dependency order, which avoids needless restarts: an \texttt{api} pod exits at startup if MongoDB or Redis is unreachable, and cannot start without the Secret.
+From the project root, all the manifests are applied at once, then the pods are followed until they are \texttt{Running}:
 %
 \begin{verbatim}
-  kubectl apply -f k8s/mongo.yaml
-  kubectl wait --for=condition=complete job/mongo-rs-init \
-          -n app --timeout=300s
-  kubectl apply -f k8s/redis.yaml -f k8s/jwt-secret.yaml
-  kubectl apply -f k8s/api.yaml -f k8s/hpa.yaml
-  kubectl apply -f k8s/web.yaml -f k8s/ingress.yaml
+  kubectl apply -f k8s/ -n app
+  kubectl get pods -n app -w
 \end{verbatim}
 %
-\textbf{Expected outcome}, resource by resource (\cref{tab:manifests}):
-%
-\begin{itemize}
-  \item \textbf{MongoDB:} \texttt{mongo-0}, \texttt{mongo-1}, \texttt{mongo-2} start in order; the Job waits for all three, initializes the replica set \texttt{rs0} and waits for a primary, in about 60--90~s (\texttt{kubectl logs job/mongo-rs-init -n app -f}).
-  \item \textbf{API:} 3 pods reach \texttt{READY 1/1} within 20--30~s (\texttt{kubectl get pods -n app -l app=api}); one started before its dependencies is restarted by Kubernetes and kept out of the Service by its readiness probe meanwhile.
-  \item \textbf{HPA:} \texttt{kubectl get hpa -n app} shows a CPU percentage as target; \texttt{<unknown>} means that \texttt{metrics-server} is not running.
-  \item \textbf{Ingress:} after a few seconds, \texttt{kubectl get ingress -n app} shows an \texttt{ADDRESS} matching the Minikube IP.
-\end{itemize}
-%
-\texttt{kubectl get all -n app} should finally list 3~\texttt{api}, 3~\texttt{mongo}, 1~\texttt{redis} and 2~\texttt{web} pods \texttt{Running}, the completed \texttt{mongo-rs-init} Job, and their Services, Deployments, StatefulSet and ReplicaSets. \texttt{http://board.local} (\texttt{:18080} on macOS, with the port-forward running) shows the login screen.
+Until the \texttt{mongo-rs-init} Job has initialized the replica set, the \texttt{api} pods exit at startup and are restarted by Kubernetes; they settle on their own once MongoDB is ready.
 
-\paragraph{JWT secret.} The committed Secret holds a placeholder for the local demo (\cref{security}); any other deployment must create it this way instead of applying \texttt{jwt-secret.yaml}, or restart the \texttt{api} Deployment afterwards, since the pods read it only at startup:
+\subsection{Reaching the Board}\label{reaching-board}
+
+The Ingress matches the hostname \texttt{board.local}, which the host must resolve to an address where the Ingress controller listens.
+
+\emph{Linux.} The node's IP is routable from the host: add \texttt{<minikube-ip>  board.local} to \texttt{/etc/hosts} (as administrator), with the output of \texttt{minikube ip -p incident-board}.
+
+\emph{macOS with the \texttt{docker} driver.} The node runs inside Docker Desktop's virtual machine and its IP is not routable. \texttt{minikube tunnel} bridges it: besides \texttt{LoadBalancer} Services, it forwards ports 80 and 443 to the Ingress controller through an SSH tunnel bound to the loopback address. It asks for the administrator password, because both ports are privileged, and its terminal must stay open:
 %
 \begin{verbatim}
-  kubectl create secret generic jwt-secret -n app \
-    --from-literal=JWT_SECRET=$(openssl rand -base64 48) \
-    --dry-run=client -o yaml | kubectl apply -f -
+  echo "127.0.0.1 board.local" | sudo tee -a /etc/hosts
+  minikube tunnel -p incident-board
 \end{verbatim}
+%
+
+The board is then served at \texttt{http://board.local}.
 
 \section{User Guide}\label{user-guide}
 

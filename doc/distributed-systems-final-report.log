@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.28)  10 OCT 2026 17:07
+This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.28)  10 OCT 2026 17:42
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -576,19 +576,24 @@ Overfull \hbox (91.22052pt too wide) in paragraph at lines 600--601
 \OT1/cmr/m/n/10.95 bob, by-pass-ing the UI, send \OT1/cmtt/m/n/10.95 PATCH /api/incidents/<id> \OT1/cmr/m/n/10.95 with \OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/10.95 "status":"closed","version":1\OMS/cmtt/m/n/10.95 g\OT1/cmr/m/n/10.95 ;
  []
 
-[31] [32] [33] [34] [35] [36]
-LaTeX Font Info:    Trying to load font information for OML+cmr on input line 767.
+[31] [32] [33]
+Overfull \hbox (1.40219pt too wide) in paragraph at lines 678--680
+\OT1/cmr/m/n/10.95 The clus-ter runs in a ded-i-cated Minikube pro-file, \OT1/cmtt/m/n/10.95 incident-board\OT1/cmr/m/n/10.95 , which ev-ery \OT1/cmtt/m/n/10.95 minikube
+ []
+
+[34] [35]
+LaTeX Font Info:    Trying to load font information for OML+cmr on input line 747.
  (/usr/local/texlive/2026/texmf-dist/tex/latex/base/omlcmr.fd
 File: omlcmr.fd 2024/11/19 v2.5n Standard LaTeX font definitions
 )
 LaTeX Font Info:    Font shape `OML/cmr/m/n' in size <10.95> not available
-(Font)              Font shape `OML/cmm/m/it' tried instead on input line 767.
- [37] [38] [39]
-Overfull \hbox (33.21954pt too wide) in paragraph at lines 847--852
+(Font)              Font shape `OML/cmm/m/it' tried instead on input line 747.
+ [36] [37] [38]
+Overfull \hbox (33.21954pt too wide) in paragraph at lines 827--832
 \OT1/cmr/m/n/10.95 would need to rec-on-cile the op-ti-mistic client-side move with the same claim/release/resolve
  []
 
-[40] (./distributed-systems-final-report.aux)
+[39] (./distributed-systems-final-report.aux)
  ***********
 LaTeX2e <2025-11-01>
 L3 programming layer <2026-01-19>
@@ -600,17 +605,17 @@ LaTeX Font Warning: Some font shapes were not available, defaults substituted.
  ) 
 Here is how much of TeX's memory you used:
  14366 strings out of 467525
- 267791 string characters out of 5418982
+ 267802 string characters out of 5418982
  811224 words of memory out of 5000000
- 43005 multiletter control sequences out of 15000+600000
+ 43008 multiletter control sequences out of 15000+600000
  636522 words of font info for 69 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 108i,11n,107p,11379b,635s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 108i,11n,107p,11379b,523s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmitt10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmssbx10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/amsfonts/cm/cmtt12.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/lm/lmmi7.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/lm/lmss8.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/lm/lmss9.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/lm/lmssbx10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/lm/lmsso8.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/lm/lmsy10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/lm/lmsy7.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/lm/lmtk10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/lm/lmtt8.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/lm/lmtti10.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb></usr/local/texlive/2026/texmf-dist/fonts/type1/public/cm-super/sftt1095.pfb>
-Output written on distributed-systems-final-report.pdf (40 pages, 497145 bytes).
+Output written on distributed-systems-final-report.pdf (39 pages, 493959 bytes).
 PDF statistics:
- 821 PDF objects out of 1000 (max. 8388607)
- 700 compressed objects within 7 object streams
- 164 named destinations out of 1000 (max. 500000)
- 611 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 814 PDF objects out of 1000 (max. 8388607)
+ 694 compressed objects within 7 object streams
+ 161 named destinations out of 1000 (max. 500000)
+ 619 words of extra memory for PDF output out of 10000 (max. 10000000)
 
