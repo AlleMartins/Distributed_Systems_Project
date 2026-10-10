@@ -7,6 +7,7 @@
 // UN solo pod (quello che ha servito la richiesta) e devono raggiungere i
 // client di tutti gli altri, cosa di cui si occupa l'adapter Redis.
 const express = require('express');
+const { ObjectId } = require('mongodb');
 const { authenticate } = require('../auth');
 const { createResolveIncidentId } = require('../resolve-incident-id');
 const { RENEW_LOCK_SCRIPT, RELEASE_LOCK_SCRIPT } = require('../lua-scripts');
@@ -15,6 +16,30 @@ const { CLAIM_TTL, lockKeyFor } = require('../config');
 const createClaimsRouter = ({ db, pubClient, io }) => {
   const router = express.Router();
   const resolveIncidentId = createResolveIncidentId(db);
+
+  // Un incidente risolto non si prende in carico: 'closed' è terminale,
+  // quindi un claim non autorizzerebbe nulla. Prima la rotta verificava
+  // solo che l'incidente esistesse, e un claim via API su un ticket chiuso
+  // rispondeva 200 e annunciava a tutti un `incident_locked`: la card
+  // restava in "Resolved" solo perché la colonna In Progress esclude i
+  // chiusi, cioè il vincolo lo teneva la UI e non il server.
+  //
+  // Lo stato si legge DOPO aver acquisito il lock, non prima: chiudere un
+  // ticket richiede di possederne il lock, quindi finché lo teniamo noi
+  // nessuno può chiuderlo, e un controllo fatto prima lascerebbe aperta la
+  // finestra in cui il proprietario precedente risolve e rilascia fra la
+  // nostra lettura e il nostro SET. Se è chiuso, il lock appena preso (o
+  // rinnovato) si rilascia senza averlo mai annunciato.
+  const rifiutaSeChiuso = async (id, lockKey, username, res) => {
+    const incidente = await db.collection('incidents').findOne(
+      { _id: new ObjectId(id) },
+      { projection: { status: 1 } }
+    );
+    if (incidente && incidente.status !== 'closed') return false;
+    await pubClient.eval(RELEASE_LOCK_SCRIPT, { keys: [lockKey], arguments: [username] });
+    res.status(409).json({ error: 'Incidente già risolto: non si può prendere in carico', status: 'closed' });
+    return true;
+  };
 
   // Permette a un operatore di "bloccare" l'incidente per CLAIM_TTL.
   router.post('/incidents/:id/claim', authenticate, async (req, res) => {
@@ -28,6 +53,7 @@ const createClaimsRouter = ({ db, pubClient, io }) => {
       const acquired = await pubClient.set(lockKey, username, { NX: true, PX: CLAIM_TTL });
 
       if (acquired) {
+        if (await rifiutaSeChiuso(id, lockKey, username, res)) return;
         // Comunichiamo a tutti i frontend che l'incidente è bloccato (per
         // disabilitare i bottoni). Il TTL viaggia con l'evento: serve ai
         // client per far scadere il lock da soli, dato che allo scadere
@@ -56,6 +82,7 @@ const createClaimsRouter = ({ db, pubClient, io }) => {
       });
 
       if (renewed !== 0) {
+        if (await rifiutaSeChiuso(id, lockKey, username, res)) return;
         // Il TTL è stato riportato a CLAIM_TTL dallo script: ri-annunciarlo
         // riallinea anche i timer di scadenza degli altri client.
         io.emit('incident_locked', { id, lockedBy: username, ttl: CLAIM_TTL });
