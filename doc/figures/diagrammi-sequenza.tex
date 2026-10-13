@@ -128,7 +128,7 @@
 \participant{R}{8.7}{Redis}{red}
 \participant{P2}{11.6}{\texttt{api} pod 2}{api}
 \participant{B}{14.3}{Browser B\\[-2pt]{\scriptsize(on pod 2)}}{net}
-\lifelines{A,P1,M,R,P2,B}{-12.75}
+\lifelines{A,P1,M,R,P2,B}{-13.6}
 
 \msg{A}{P1}{-0.95}{\texttt{POST .../:id/claim}}
 \msg{P1}{M}{-1.4}{\texttt{countDocuments(\{\_id\})}}
@@ -136,25 +136,33 @@
 \msg{P1}{R}{-2.3}{\texttt{SET lock:incident:id A NX PX 60000}}
 \msg[ret]{R}{P1}{-2.75}{\texttt{OK} or \texttt{nil}}
 
-\fragment{alt}{-0.95}{15.3}{-3.05}{-12.45}{[\texttt{OK}: lock acquired]}
-\msg{P1}{A}{-3.8}{\texttt{incident\_locked}}
-\msg{P1}{R}{-4.25}{\texttt{io.emit}: PUBLISH \texttt{incident\_locked}}
-\msg{R}{P2}{-4.7}{\texttt{incident\_locked}}
-\msg{P2}{B}{-5.15}{\texttt{\{id, A, ttl\}}}
-\msg[ret]{P1}{A}{-5.6}{\texttt{200 \{lockedBy, ttl\}}}
-\fragsep{-0.95}{15.3}{-5.9}{[\texttt{nil}: the key already exists]}
-\msg{P1}{R}{-6.65}{\texttt{EVAL RENEW\_LOCK\_SCRIPT} (A, 60000)}
-\msg[ret]{R}{P1}{-7.1}{1 or 0}
-\fragment{alt}{-0.7}{15.05}{-7.4}{-12.2}{[1: the lock is already A's]}
-\msg{P1}{A}{-8.15}{\texttt{incident\_locked}}
-\msg{P1}{R}{-8.6}{PUBLISH \texttt{incident\_locked} (TTL realigned)}
-\msg{R}{P2}{-9.05}{\texttt{incident\_locked}}
-\msg{P2}{B}{-9.5}{\texttt{\{id, A, ttl\}}}
-\msg[ret]{P1}{A}{-9.95}{\texttt{200} (idempotent)}
-\fragsep{-0.7}{15.05}{-10.25}{[0: held by another operator]}
-\msg{P1}{R}{-11.0}{\texttt{GET lock:incident:id}}
-\msg[ret]{R}{P1}{-11.45}{owner}
-\msg[ret]{P1}{A}{-11.9}{\texttt{409 \{lockedBy\}}}
+% Il rinnovo rende il claim idempotente per il proprietario; dopo, nuovo
+% claim e rinnovo seguono lo stesso percorso (claims.js).
+\fragment{opt}{-0.95}{15.3}{-3.05}{-4.55}{[\texttt{nil}: the key already exists]}
+\msg{P1}{R}{-3.8}{\texttt{EVAL RENEW\_LOCK\_SCRIPT} (A, 60000)}
+\msg[ret]{R}{P1}{-4.25}{1: already A's, TTL reset (idempotent) \quad 0: someone else's}
+
+\fragment{alt}{-0.95}{15.3}{-4.85}{-13.3}{[0: held by another operator]}
+\msg{P1}{R}{-5.6}{\texttt{GET lock:incident:id}}
+\msg[ret]{R}{P1}{-6.05}{owner}
+\msg[ret]{P1}{A}{-6.5}{\texttt{409 \{lockedBy\}}}
+\fragsep{-0.95}{15.3}{-6.8}{[\texttt{OK} or 1: A holds the lock]}
+% Lo status si legge DOPO aver preso il lock: letto prima, una risoluzione
+% nel mezzo lascerebbe prendere in carico un incidente già chiuso.
+\msg{P1}{M}{-7.55}{\texttt{findOne(\{\_id\}, status)}}
+\msg[ret]{M}{P1}{-8.0}{status}
+\fragment{alt}{-0.7}{15.05}{-8.3}{-13.05}{[\texttt{closed}]}
+\msg{P1}{R}{-9.05}{\texttt{EVAL RELEASE\_LOCK\_SCRIPT} (A)}
+\msg[ret]{R}{P1}{-9.5}{1: released}
+\msg[ret]{P1}{A}{-9.95}{\texttt{409 \{status: closed\}}}
+\fragsep{-0.7}{15.05}{-10.25}{[\texttt{open} or \texttt{escalated}]}
+\msg{P1}{A}{-11.0}{\texttt{incident\_locked}}
+\msg{P1}{R}{-11.45}{\texttt{io.emit}: PUBLISH \texttt{incident\_locked}}
+\msg{R}{P2}{-11.9}{\texttt{incident\_locked}}
+\msg{P2}{B}{-12.35}{\texttt{\{id, A, ttl\}}}
+\msg[ret]{P1}{A}{-12.8}{\texttt{200 \{lockedBy, ttl\}}}
+
+\node[note, anchor=west] at (3.3,-9.95) {no event: nothing is announced};
 \end{tikzpicture}
 
 % =====================================================================
@@ -212,7 +220,7 @@
 \lifelines{A,P1,R,M,P2,B}{-8.0}
 
 \fragment{loop}{-0.95}{15.3}{-0.75}{-6.15}{[every 10\,s, independently on every pod]}
-\msgtwo{P1}{R}{-1.5}{\texttt{SET leader:escalation}}{\texttt{pod1 NX PX 15000}}
+\msg{P1}{R}{-1.5}{\texttt{SET leader:escalation pod1 NX PX 15000}}
 \msg[ret]{R}{P1}{-2.05}{\texttt{OK} (or Lua renewal: 1)}
 \msg{P2}{R}{-2.4}{\texttt{SET leader:escalation pod2 NX PX 15000}}
 \msg[ret]{R}{P2}{-2.85}{\texttt{nil}}

@@ -24,13 +24,21 @@
 \maketitle
 
 \begin{abstract}
-    This project presents a distributed real-time incident management system designed for collaborative ticket resolution in operational environments. 
-    The system enables multiple operators to simultaneously interact with a shared pool of incidents through a web-based Kanban dashboard. 
+    This project presents a distributed real-time incident management dashboard designed for collaborative ticket resolution in operational environments. 
+    The system enables multiple operators to simultaneously interact with a shared pool of incidents through a web-based dashboard. 
     The architecture follows a three-tier pattern: a Vue.js 3 single-page application serves as the presentation layer, an Express.js API with Socket.IO handles real-time communication and business logic, while a MongoDB Replica Set ensures persistent strongly-consistent state and Redis provides distributed coordination. 
-    Key distributed systems patterns implemented include: (i) Redis-based distributed locking with Lua scripts for atomic claim/release operations, preventing race conditions during ticket assignment; (ii) optimistic locking via document versioning in MongoDB to avoid lost updates during concurrent modifications; 
-    (iii) leader election using Redis TTL keys for exclusive execution of background tasks (automatic escalation of stale incidents); (iv) MongoDB Change Streams for reactive, event-driven synchronization across all connected clients without polling. 
-    The entire system is containerized and orchestrated via Kubernetes, featuring a 3-node MongoDB StatefulSet for data persistence and failover, Horizontal Pod Autoscaler for the API tier (3--10 replicas), and an Ingress with session affinity. 
+    Key distributed systems patterns implemented include: (i) Redis-based distributed locking and Lua scripts for check-then-act operations, preventing race conditions during ticket assignment; (ii) optimistic locking via document versioning in MongoDB to avoid lost updates during concurrent modifications; 
+    (iii) leader election using Redis TTL keys for exclusive execution of background tasks (automatic escalation of stale incidents); (iv) event-driven synchronization of all connected clients without polling, combining MongoDB Change Streams for incident updates with Redis Pub/Sub (via the Socket.IO adapter) for lock and presence events.
+    The entire system is containerized and orchestrated via Kubernetes (validated via Minikube), featuring a 3-node MongoDB StatefulSet for data persistence and failover, Horizontal Pod Autoscaler for the API tier (3--10 replicas), and an Ingress with session affinity. 
 \end{abstract}
+
+\section*{Disclaimer}
+
+During the preparation of this work, the author used an LLM to help design the acceptance test procedures
+
+After using this tool/service, 
+the author reviewed and edited the content as needed 
+and take full responsibility for the content of the final report.
 
 \section{Concept}\label{concept}
 
@@ -65,9 +73,11 @@ The Kubernetes architecture addresses this by:
 %
 \begin{itemize}
     \item Running \textbf{3 API replicas} minimum, so the loss of one pod does not interrupt service
-    \item Deploying MongoDB as a \textbf{3-node Replica Set}, which tolerates the failure of one node while maintaining a primary for writes
+    \item Deploying MongoDB as a \textbf{3-node Replica Set}, which tolerates the failure of one node, electing a new primary if needed
     \item Using Redis for shared state, so any API pod can take over coordination tasks
 \end{itemize}
+%
+Redis itself, however, runs as a single instance and is the one component left without redundancy: if it fails, the whole system becomes unavailable (see \cref{fault-tolerance}).
 
 \subsubsection{Scalability}
 
@@ -76,14 +86,12 @@ The system employs a \textbf{Horizontal Pod Autoscaler} (HPA) that scales the AP
 %
 \begin{itemize}
     \item HTTP request handling capacity increases with load
-    \item Socket.IO connections are distributed across multiple pods (via the Redis adapter)
-    \item The background escalation task is executed by exactly one leader, regardless of pod count
+    \item Socket.IO connections are distributed across multiple pods
 \end{itemize}
 
 \subsubsection{Resource Sharing}
 
 Multiple operators must access and modify the \textbf{same shared pool of incidents} concurrently.
-Without distribution, the system would be limited to a single operator at a time, defeating its collaborative purpose.
 The distributed architecture enables:
 %
 \begin{itemize}
@@ -102,10 +110,10 @@ The MongoDB Replica Set could be extended with nodes in different data centers, 
 
 \begin{itemize}
   \item[\textbf{FR1}] \textbf{Board access.} An operator can join the board by registering a username/password pair and, on subsequent visits, logging in with those credentials. \\
-  \emph{Acceptance criterion:} submitting valid credentials on the login form transitions the client from the login screen to the dashboard and establishes a persistent, authenticated WebSocket connection; submitting invalid credentials is rejected with an error and no connection is established.
+  \emph{Acceptance criterion:} submitting valid credentials on the login form transitions the client from the login screen to the dashboard and establishes a persistent, authenticated WebSocket connection.
 
-  \item[\textbf{FR2}] \textbf{Incident creation.} An operator can create a new incident by providing a title; the system assigns it a default status of \texttt{open}, a creation timestamp, and the creator's identity. \\
-  \emph{Acceptance criterion:} a valid \texttt{POST /api/incidents} request returns \texttt{201} and the new incident appears as a card in the ``Open'' column of every connected client without any client issuing a manual refresh.
+  \item[\textbf{FR2}] \textbf{Incident creation.} An operator can create a new incident by providing a title; the system assigns it a default status of \texttt{open} and the creator's identity. \\
+  \emph{Acceptance criterion:} The new incident appears as a card in the ``Open'' column of every connected client without any client issuing a manual refresh.
 
   \item[\textbf{FR3}] \textbf{Real-time board synchronization.} All connected operators must observe incident creations, claims, releases, resolutions, and escalations as they happen. \\
   \emph{Acceptance criterion:} an action performed by operator A becomes visible on operator B's board without B reloading the page or polling.
@@ -139,33 +147,22 @@ The MongoDB Replica Set could be extended with nodes in different data centers, 
   \emph{Realized by:} optimistic locking via a \texttt{version} field, matched on every \texttt{PATCH}. \\
   \emph{Acceptance criterion:} a \texttt{PATCH} carrying a stale version is rejected with \texttt{409} and leaves the document unmodified.
 
-  \item[\textbf{NFR2}] \textbf{Server-enforced mutual exclusion.} The claim mechanism must be enforced by the server, not merely suggested by the client interface. \\
-  \emph{Acceptance criterion:} a resolution request issued by an operator who does not currently hold the incident's lock is rejected with \texttt{409}, even when the request bypasses the UI entirely (e.g., sent directly to the API).
-
-  \item[\textbf{NFR3}] \textbf{Fault tolerance of the API tier.} The loss of any single API pod must not interrupt service for connected or new operators. \\
+  \item[\textbf{NFR2}] \textbf{Fault tolerance of the API tier.} The loss of any single API pod must not interrupt service for connected or new operators. \\
   \emph{Acceptance criterion:} deleting one of the $\geq 3$ running \texttt{api} pods produces no visible downtime; remaining pods continue serving requests, and Socket.IO clients transparently reconnect to a healthy pod.
 
-  \item[\textbf{NFR4}] \textbf{Fault tolerance of the data tier.} The loss of any single MongoDB node must not lose committed data, and must restore read/write availability automatically, within a primary election. \\
+  \item[\textbf{NFR3}] \textbf{Fault tolerance of the data tier.} The loss of any single MongoDB node must not lose committed data, and must restore read/write availability automatically, within a primary election. \\
   \emph{Realized by:} a 3-node Replica Set with automatic primary election, protected by a \texttt{PodDisruptionBudget} (\texttt{minAvailable: 2}) that prevents voluntary evictions from breaking quorum. \\
   \emph{Acceptance criterion:} terminating one of the 3 \texttt{mongo} pods triggers automatic recovery (re-election if the primary was lost) without manual intervention, and the API resumes normal operation once the probe reports readiness again.
 
-  \item[\textbf{NFR5}] \textbf{Exactly-once background execution.} The automatic escalation task must execute exactly once per cycle across the whole cluster, regardless of how many API pods are running. \\
-  \emph{Realized by:} Redis-based leader election with an atomically-renewed lock (Lua script, preventing the split-brain window of a naive \texttt{GET}+\texttt{PEXPIRE}). \\
-  \emph{Acceptance criterion:} with $N \geq 1$ running \texttt{api} pods, a given incident is escalated exactly once (no duplicate version increments, no duplicate log entries).
-
-  \item[\textbf{NFR6}] \textbf{Horizontal scalability.} The API tier must absorb increased load by adding replicas automatically, without manual intervention. \\
+  \item[\textbf{NFR4}] \textbf{Horizontal scalability.} The API tier must absorb increased load by adding replicas automatically, without manual intervention. \\
   \emph{Realized by:} a \texttt{HorizontalPodAutoscaler} (3--10 replicas, 80\% CPU utilization target). \\
   \emph{Acceptance criterion:} sustained CPU load above the threshold results in additional \texttt{api} pods being scheduled within the HPA's stabilization window.
 
-  \item[\textbf{NFR7}] \textbf{Reconnection consistency.} A client that experiences a temporary disconnection (e.g., during a rolling update of the API tier) must never regress to a state older than what it displayed before disconnecting, and must recover the \emph{whole} observable state of each incident, including who currently holds its claim. \\
+  \item[\textbf{NFR5}] \textbf{Reconnection consistency.} A client that experiences a temporary disconnection (e.g., during a rolling update of the API tier) must never regress to a state older than what it displayed before disconnecting, and must recover the \emph{whole} observable state of each incident, including who currently holds its claim. \\
   \emph{Realized by:} a resynchronization-generation counter that discards any hydration response superseded by a later one, and a board snapshot that carries the claim state read from Redis rather than the MongoDB documents alone. \\
   \emph{Acceptance criterion:} rapid, repeated reconnects never leave the client displaying data fetched by an earlier, superseded hydration; and an operator who reloads the page while holding a claim still sees that claim, and retains the actions it authorizes.
 
-  \item[\textbf{NFR8}] \textbf{Self-healing presence data.} The count of online operators must never permanently overcount stale sessions after an ungraceful pod termination. \\
-  \emph{Realized by:} deriving presence from \texttt{io.fetchSockets()} (live socket introspection across the Redis adapter) instead of a manually-maintained Redis hash, which was found during development to leak stale entries on unclean shutdowns. \\
-  \emph{Acceptance criterion:} after force-terminating an API pod, the online-user count converges to the correct value without manual state cleanup.
-
-  \item[\textbf{NFR9}] \textbf{UI eventual consistency.} A given incident must never be rendered in two mutually-exclusive Kanban columns at once, regardless of the arrival order of independent real-time events describing the same state change. \\
+  \item[\textbf{NFR6}] \textbf{UI eventual consistency.} A given incident must never be rendered in two mutually-exclusive Kanban columns at once, regardless of the arrival order of independent real-time events describing the same state change. \\
   \emph{Acceptance criterion:} resolving a claimed incident never produces a transient duplicate card appearing simultaneously in ``In Progress'' and ``Resolved'', irrespective of whether the lock-release event or the database change-stream event is delivered to the client first.
 \end{itemize}
 
@@ -188,40 +185,31 @@ The MongoDB Replica Set could be extended with nodes in different data centers, 
 
 \subsubsection{Transparency}
 
-Transparency is \textbf{partially relevant}. \emph{Location and replication} transparency are provided: the browser never knows which of the 3 to 10 \texttt{api} pods serves it, hidden behind the Ingress, nor which \texttt{mongo} node is currently primary, hidden behind the replica-set connection string. \emph{Failure} transparency is partial: after a pod failure the client reconnects and resynchronizes on its own instead of surfacing an error. \emph{Concurrency} transparency is deliberately \emph{not} pursued: a claimed incident shows its holder to every operator, because knowing that a colleague is already on it is exactly what prevents duplicated work.
+Transparency is \textbf{partially relevant}. \emph{Location and replication} transparency are provided: the browser never knows which of the 3 to 10 \texttt{api} pods serves it, hidden behind the Ingress, nor which \texttt{mongo} node is currently primary, hidden behind the replica-set connection string. \emph{Failure} transparency is partial: after a pod failure the client reconnects and resynchronizes on its own instead of surfacing an error. 
 
 \subsubsection{Fault Tolerance, Dependability}
 
-Fault tolerance is \textbf{relevant}. The system must survive the loss of any one \texttt{api} pod (stateless, $\geq 3$ replicas) and of any one \texttt{mongo} node (3-node Replica Set) without interrupting service, and must never lose or silently corrupt data, which is why concurrent writes use optimistic locking rather than ``last write wins''. Recovery is automatic: if the leader fails, its 15-second lock expires and another pod resumes the escalation task within seconds. Redis is the deliberate exception: a single, non-persistent instance holding only coordination state. Its loss costs no incident or credential, but makes the whole board unavailable until it returns, and a restart drops all active claims (\cref{future-works}).
+Fault tolerance is \textbf{relevant}. The system must survive the loss of any one \texttt{api} pod (stateless, $\geq 3$ replicas) and of any one \texttt{mongo} node (3-node Replica Set) without interrupting service, and must never lose or silently corrupt data, which is why concurrent writes use optimistic locking rather than ``last write wins''. Recovery is automatic: if the leader fails, its 15-second lock expires and another pod resumes the escalation task within seconds. Redis is the deliberate exception: a single, non-persistent instance holding only coordination state. Its loss costs no incident or credential, but makes the whole board unavailable until it returns, and a restart drops all active claims.
 
 \subsubsection{Scalability}
 
-Scalability is \textbf{relevant} for the stateless API tier and \textbf{out of scope} for the data and coordination tiers. The \texttt{api} Deployment scales between 3 and 10 replicas through a \texttt{HorizontalPodAutoscaler} on CPU utilization. MongoDB's 3 nodes exist to tolerate failures, not to add throughput (reads are not routed to secondaries), and Redis is not scaled at all: a conscious trade-off given the project's scope.
+Scalability is \textbf{relevant} for the stateless API tier and \textbf{out of scope} for the data and coordination tiers. The \texttt{api} Deployment scales between 3 and 10 replicas through a \texttt{HorizontalPodAutoscaler} on CPU utilization. 
 
 \subsubsection{Security, Trust}
 
-Security is \textbf{deliberately minimized} in favour of the project's focus on distributed coordination. Operators authenticate with a username and password (bcrypt-hashed, stateless JWT session), but there is a single implicit role, no TLS between components and no encryption at rest. 
+Security is \textbf{deliberately minimized} in favour of the project's focus on distributed coordination. Operators authenticate with a username and password.
+
 \subsubsection{Resource Sharing}
 
 Resource sharing is the \textbf{central motivation} for the entire project: multiple SOC operators must concurrently read and modify the \emph{same} shared pool of incidents, which is precisely the scenario that requires distributed coordination rather than a simple single-user application. This single feature justifies two of the three coordination mechanisms implemented: the distributed lock, which serializes exclusive access to an individual incident (claim/release), and optimistic locking, which detects (rather than prevents) conflicting concurrent writes on the shared MongoDB collection.
 
-\subsubsection{Openness, Interoperability, Heterogeneity of Components}
-
-This feature is \textbf{not relevant} to the current scope. The system is a closed application that does not interact with external ticketing or monitoring systems, and does not expose a public, versioned API intended for third-party consumption. The architecture does not preclude such integration in the future (the REST layer could, in principle, be consumed by an external system), but no standardization or interoperability requirement was elicited for this iteration.
-
 \subsubsection{Evolvability, Maintainability}
 
-This feature is \textbf{relevant}. The codebase is split into three independently deployable units (\texttt{api/}, \texttt{web/}, \texttt{k8s/}), and the separation between shallow liveness and deep readiness probes lets the API tier be rolled out without needless restarts or traffic loss. Development also showed that hand-rolled coordination primitives carry a real maintenance cost, since three of them had to be corrected after their first implementation:
-\begin{itemize}
-  \item the leadership lock was renewed with a non-atomic \texttt{GET}+\texttt{PEXPIRE}, a split-brain risk now closed by an atomic Lua script;
-  \item a manually-maintained ``active users'' Redis hash leaked stale entries across unclean pod restarts, and was replaced by \texttt{io.fetchSockets()};
-  \item the claim lock existed only as the \texttt{incident\_locked} broadcast, so it was missing from the snapshot a client hydrates from. A holder who reloaded the page saw their ticket back in ``Open'' and received a \texttt{409} when re-claiming it, locked out until the TTL elapsed, while clients that hydrated at different moments disagreed indefinitely. The fix reads the lock back into the snapshot, makes a re-claim by the holder idempotent and ships the remaining TTL, so that clients expire it on their own.
-\end{itemize}
-The last defect is the most instructive, because it was conceptual rather than a race condition and nothing ever failed loudly: any state a client must reconstruct has to be \emph{readable}, not merely \emph{announced}. Coordination primitives require deliberate care to stay correct as the system evolves, not merely to be implemented once.
+This feature is \textbf{relevant}. The board will need updates after deployment, such as new incident fields or states, and rolling updates replace the \texttt{api} and \texttt{web} replicas gradually, without stopping the service. 
 
 \subsubsection{Performance, Concurrency, Computation/Communication Efficiency, Bandwidth}
 
-This feature is \textbf{relevant}, though no quantitative target (e.g., a latency SLA) was elicited. For communication efficiency, updates are pushed through MongoDB Change Streams and Socket.IO over WebSocket rather than by polling. The main trade-off is that every \texttt{api} pod opens its own Change Stream cursor: each pod then emits only to its local clients, with no duplicate delivery through the Redis adapter, but the primary serves one cursor per pod, a cost that grows linearly as the HPA scales toward 10 replicas.
+This feature is \textbf{relevant}, though no quantitative target was elicited. For communication efficiency, updates are pushed through MongoDB Change Streams and Socket.IO over WebSocket rather than by polling. The main trade-off is that every \texttt{api} pod opens its own Change Stream cursor: each pod then emits only to its local clients, with no duplicate delivery through the Redis adapter, but the primary serves one cursor per pod, a cost that grows linearly as the HPA scales toward 10 replicas.
 
 \subsubsection{Economy, Costs}
 
@@ -236,8 +224,8 @@ The system follows a three-tier, layered architecture (presentation, application
 Two motivations drive this style, both traceable to \cref{requirements}:
 %
 \begin{itemize}
-  \item \textbf{Horizontal scalability}: the \texttt{api} tier is stateless \emph{with respect to domain state}, which lets the HPA scale it between 3 and 10 replicas. Any request can be served by any replica, since identity travels in a JWT and domain state lives only in MongoDB (incidents and operator accounts) and Redis (claims, leadership). Each replica still holds disposable \emph{connection} state --- its WebSocket sessions and its Change Stream cursor --- which a client simply rebuilds by reconnecting elsewhere and rehydrating (\cref{modelling}).
-  \item \textbf{Near-real-time propagation}: instead of polling, clients receive events through two channels. Changes to incidents are observed by \emph{every} replica through its own MongoDB Change Stream and pushed to that replica's clients, so the data layer itself is the source of truth for \emph{what changed}; changes to ephemeral state (claims, presence) start on one replica and reach the others through Redis Pub/Sub, which acts as the message broker (\cref{interaction}).
+  \item \textbf{Horizontal scalability}: the \texttt{api} tier is stateless \emph{with respect to domain state}, which lets the HPA scale it between 3 and 10 replicas. Any request can be served by any replica, since identity travels in a JWT and domain state lives only in MongoDB (incidents and operator accounts) and Redis (claims, leadership). Each replica still holds disposable \emph{connection} state --- its WebSocket sessions and its Change Stream cursor --- which a client simply rebuilds by reconnecting elsewhere and rehydrating.
+  \item \textbf{Near-real-time propagation}: instead of polling, clients receive events through two channels. Changes to incidents are observed by \emph{every} replica through its own MongoDB Change Stream and pushed to that replica's clients, so the data layer itself is the source of truth for \emph{what changed}; changes to ephemeral state (claims, presence) start on one replica and reach the others through Redis Pub/Sub, which acts as the message broker.
 \end{itemize}
  
 \subsection{Infrastructure}\label{infrastructure}
@@ -247,7 +235,7 @@ The infrastructure is composed of the following components, all containerized an
 \begin{itemize}
   \item \textbf{Clients:} operator web browsers, running the Vue.js 3 SPA.
   \item \textbf{Static file server:} an Nginx container (\texttt{web} Deployment) serving the compiled Vue.js bundle; stateless, two replicas protected by a \texttt{PodDisruptionBudget}.
-  \item \textbf{Application servers:} Express.js + Socket.IO processes (\texttt{api} Deployment), stateless with respect to domain state (\cref{architecture}), horizontally scaled 3--10 replicas by a \texttt{HorizontalPodAutoscaler} on CPU utilization, and protected by a \texttt{PodDisruptionBudget} (\texttt{maxUnavailable: 1}, a relative bound that adapts to the current replica count).
+  \item \textbf{Application servers:} Express.js + Socket.IO processes (\texttt{api} Deployment), stateless with respect to domain state, horizontally scaled 3--10 replicas by a \texttt{HorizontalPodAutoscaler} on CPU utilization, and protected by a \texttt{PodDisruptionBudget} (\texttt{maxUnavailable: 1}, a relative bound that adapts to the current replica count).
   \item \textbf{Reverse proxy / load balancer:} the Kubernetes Ingress (Nginx controller, enabled as a Minikube addon), which performs path-based routing (\texttt{/} to \texttt{web}, \texttt{/api/*} and \texttt{/socket.io/*} to \texttt{api}) and cookie-based sticky sessions across the \texttt{api} replicas.
   \item \textbf{Database:} a 3-node MongoDB Replica Set (\texttt{StatefulSet}), the durable system of record for both incidents and operator credentials (the \texttt{incidents} and \texttt{users} collections). Each member owns a \texttt{PersistentVolumeClaim} created from the StatefulSet's \texttt{volumeClaimTemplates}, so its data survives the recreation of its pod, and a \texttt{PodDisruptionBudget} (\texttt{minAvailable: 2}) prevents voluntary disruptions from taking away the majority needed to elect a primary.
   \item \textbf{Message broker / coordination store:} a single Redis instance, serving three distinct roles simultaneously --- the Socket.IO Pub/Sub adapter (cross-pod WebSocket broadcast), the distributed-lock store (incident claims), and the leader-election store (background task). It runs as a one-replica Deployment with no persistence and no probes of its own, which makes it the only component without redundancy: since every \texttt{api} readiness probe pings Redis, its failure takes \emph{all} \texttt{api} replicas out of the Service at once. This single point of failure is a deliberate simplification of the project, not an oversight; replacing it with Redis Sentinel or Redis Cluster is discussed in \cref{future-works}.
@@ -276,7 +264,7 @@ Beyond this, the MongoDB driver discovers the current primary by itself from the
  
 \subsection{Modelling}\label{modelling}
  
-\paragraph{Domain entities.} The core entity is the \textbf{Incident} (\texttt{title}, \texttt{status} $\in \{\texttt{open}, \texttt{escalated}, \texttt{closed}\}$, \texttt{createdBy}, \texttt{closedBy}, \texttt{version}, \texttt{updatedAt}). Two further concepts are kept outside it. The \textbf{Operator} has persistent credentials (username and bcrypt hash), but its \emph{presence} exists only while its WebSocket connection is open. The \textbf{Claim}, the exclusive right to work on an incident, is never written to MongoDB: it is a Redis key with a time-to-live, which is nevertheless read back into the board snapshot at every hydration (\cref{database-querying}). \Cref{fig:class-diagram} shows these entities together with the backend modules that operate on them.
+\paragraph{Domain entities.} The core entity is the \textbf{Incident} (\texttt{title}, \texttt{status} $\in \{\texttt{open}, \texttt{escalated}, \texttt{closed}\}$, \texttt{createdBy}, \texttt{closedBy}, \texttt{version}, \texttt{updatedAt}). Two further concepts are kept outside it. The \textbf{Operator} has persistent credentials (username and password), but its \emph{presence} exists only while its WebSocket connection is open. The \textbf{Claim}, the exclusive right to work on an incident, is never written to MongoDB: it is a Redis key with a time-to-live, which is nevertheless read back into the board snapshot at every hydration. \Cref{fig:class-diagram} shows these entities together with the backend modules that operate on them.
 
 \begin{figure}[htbp]
   \centering
@@ -289,7 +277,7 @@ Beyond this, the MongoDB driver discovers the current primary by itself from the
 \paragraph{Mapping to infrastructure.} This distinction directly reflects each entity's durability requirement:
 %
 \begin{itemize}
-  \item The \textbf{Incident} must survive pod restarts, rolling updates, and node failures, and is therefore stored in MongoDB, replicated across the 3-node Replica Set.
+  \item The \textbf{Incident} must survive pod restarts, rolling updates, and member failures, and is therefore stored in MongoDB, replicated across the 3-node Replica Set.
   \item The \textbf{Claim} and the \textbf{leadership mandate} are, by design, short-lived and self-expiring; persisting them durably would be both unnecessary and actively harmful (a durable lock that outlives its holder's crashed connection would deadlock the resource). They are therefore stored in Redis, an in-memory store with native TTL support.
   \item The \textbf{Operator}'s \emph{credentials} are persisted in MongoDB, because authentication must outlive any single connection or pod; the operator's \emph{presence}, by contrast, is not persisted anywhere: it exists only as \texttt{socket.data.username} on a live connection, discoverable cluster-wide on demand via \texttt{io.fetchSockets()}, and simply ceases to exist the moment the connection closes.
 \end{itemize}
@@ -320,9 +308,7 @@ Within the publish/subscribe direction, two further sub-patterns are used depend
   \item Changes to \textbf{ephemeral} state not reflected in MongoDB (claim, release, presence) are broadcast via \texttt{io.emit()}, which \emph{does} need to cross pod boundaries through the Redis adapter, since only one pod knows the change happened: the one that served the claim or release request, or the one where an operator's WebSocket connected or disconnected. Resolving an incident uses both channels at once: the status change reaches clients through the Change Stream, while the release of its lock is announced with \texttt{io.emit()}.
 \end{itemize}
 %
-A third case has no originating pod at all: when a claim lock simply \emph{expires} in Redis, no request was served and no pod is aware that anything happened, so no event can be emitted. This category of change is therefore not propagated by a broadcast but \emph{predicted} by each client independently, from the remaining time-to-live the server sends alongside every lock. Overlooking this third case was the root of a defect described in \cref{ds-features}, \emph{Evolvability, Maintainability}. Two control messages complete the picture: \texttt{resync\_required} and the eviction of a degraded pod's clients, both addressed only to that pod's own clients (\cref{fault-tolerance}).
-
-\paragraph{Sequence diagrams.} The four most significant interactions are shown below, each with two \texttt{api} pods so that it is visible which messages cross pod boundaries. \Cref{fig:seq-login} covers login, the WebSocket handshake, presence and the hydration of the board. \Cref{fig:seq-claim} shows a claim with its three possible outcomes. \Cref{fig:seq-resolve} shows a resolution, where the two channels run in parallel: the release of the lock travels through Redis Pub/Sub, the status change through the Change Stream of every pod. \Cref{fig:seq-escalation} shows the SLA escalation run by the leader, which writes to MongoDB and leaves the notification to the Change Streams.
+\paragraph{Sequence diagrams.} The four most significant interactions are shown below, each with two \texttt{api} pods so that it is visible which messages cross pod boundaries. \Cref{fig:seq-login} covers login, the WebSocket handshake, presence and the hydration of the board. \Cref{fig:seq-claim} shows a claim with its four possible outcomes. \Cref{fig:seq-resolve} shows a resolution, where the two channels run in parallel: the release of the lock travels through Redis Pub/Sub, the status change through the Change Stream of every pod. \Cref{fig:seq-escalation} shows the SLA escalation run by the leader, which writes to MongoDB and leaves the notification to the Change Streams.
 
 \begin{figure}[htbp]
   \centering
@@ -336,7 +322,7 @@ A third case has no originating pod at all: when a claim lock simply \emph{expir
   \centering
   % Sorgente TikZ in figures/diagrammi-sequenza.tex (una pagina per diagramma): va ricompilato a parte dopo ogni modifica.
   \includegraphics[width=\textwidth,page=2]{figures/diagrammi-sequenza.pdf}
-  \caption{Claiming an incident. The claim is idempotent for the operator who already holds the lock; the \texttt{409} is reserved for a conflict with another operator.}
+  \caption{Claiming an incident. The claim is idempotent for the operator who already holds the lock; the \texttt{409} is reserved for a conflict with another operator or an already resolved incident.}
   \label{fig:seq-claim}
 \end{figure}
 
@@ -366,12 +352,12 @@ A third case has no originating pod at all: when a claim lock simply \emph{expir
   \item \textbf{The Vue.js client} never updates its state optimistically: the response to a command only reports its outcome, and the board changes only through server events and snapshots, so it never shows the effect of a command before the server has confirmed it.
 \end{itemize}
  
-\paragraph{State diagrams.} Four components have an explicit lifecycle worth modelling. An \textbf{incident} (\cref{fig:state-incident}) combines its durable status in MongoDB with the ephemeral claim in Redis: the two dimensions are independent, which is why an incident can be escalated while someone is working on it. Each \texttt{api} pod has two internal state machines: its \textbf{Change Stream} (\cref{fig:state-changestream}), which decides whether the pod is ready to receive traffic, and its role in the \textbf{leader election} (\cref{fig:state-leader}). Finally, each \textbf{client session} (\cref{fig:state-client}) moves between connecting, hydrating from the REST snapshot and following live events.
+\paragraph{State diagrams.} Three components have an explicit lifecycle worth modelling. An \textbf{incident} (\cref{fig:state-incident}) combines its durable status in MongoDB with the ephemeral claim in Redis: the two dimensions are independent, which is why an incident can be escalated while someone is working on it. Each \texttt{api} pod has an internal state machine for its role in the \textbf{leader election} (\cref{fig:state-leader}). Finally, each \textbf{client session} (\cref{fig:state-client}) moves between connecting, hydrating from the REST snapshot and following live events.
 
 \begin{figure}[htbp]
   \centering
   % Sorgente TikZ in figures/diagrammi-stato.tex (una pagina per diagramma): va ricompilato a parte dopo ogni modifica.
-  \includegraphics[width=\textwidth,page=1]{figures/diagrammi-stato.pdf}
+  \includegraphics[page=1]{figures/diagrammi-stato.pdf}
   \caption{Incident lifecycle. The \emph{In progress} composite state corresponds to the claimed incidents; its two substates keep the status that the incident returns to when the claim is released or expires.}
   \label{fig:state-incident}
 \end{figure}
@@ -379,15 +365,7 @@ A third case has no originating pod at all: when a claim lock simply \emph{expir
 \begin{figure}[htbp]
   \centering
   % Sorgente TikZ in figures/diagrammi-stato.tex (una pagina per diagramma): va ricompilato a parte dopo ogni modifica.
-  \includegraphics[width=\textwidth,page=2]{figures/diagrammi-stato.pdf}
-  \caption{Change Stream of a single \texttt{api} pod. Only the \emph{Streaming} state passes the readiness probe; the retry reschedules itself even when \texttt{watch()} fails synchronously.}
-  \label{fig:state-changestream}
-\end{figure}
-
-\begin{figure}[htbp]
-  \centering
-  % Sorgente TikZ in figures/diagrammi-stato.tex (una pagina per diagramma): va ricompilato a parte dopo ogni modifica.
-  \includegraphics[width=\textwidth,page=3]{figures/diagrammi-stato.pdf}
+  \includegraphics[page=2]{figures/diagrammi-stato.pdf}
   \caption{Leader election, as seen by a single \texttt{api} pod at every 10-second tick.}
   \label{fig:state-leader}
 \end{figure}
@@ -395,7 +373,7 @@ A third case has no originating pod at all: when a claim lock simply \emph{expir
 \begin{figure}[htbp]
   \centering
   % Sorgente TikZ in figures/diagrammi-stato.tex (una pagina per diagramma): va ricompilato a parte dopo ogni modifica.
-  \includegraphics[width=\textwidth,page=4]{figures/diagrammi-stato.pdf}
+  \includegraphics[page=3]{figures/diagrammi-stato.pdf}
   \caption{Client session in the browser. The \emph{generation} counter discards snapshots that arrive after a newer resynchronization has started.}
   \label{fig:state-client}
 \end{figure}
@@ -407,7 +385,7 @@ A third case has no originating pod at all: when a claim lock simply \emph{expir
  
 \paragraph{What is stored, and where.} Incidents are the only data that must persist beyond a single request or connection; they are stored in \textbf{MongoDB} as documents. The document model was chosen because incidents are naturally semi-structured records whose schema evolved incrementally over the project's development (e.g., the \texttt{escalated} status and the \texttt{closedBy} field were both introduced after the initial design) without requiring a formal migration step. Coordination data (locks, leadership) is stored in \textbf{Redis} as plain key-value pairs, chosen because the access pattern is a pure read/write/expire on independent keys with no relational structure, and because lock contention needs sub-millisecond latency that an in-memory store provides naturally.
  
-\paragraph{Query and write patterns.} \texttt{api} pods are the only components that ever query or write MongoDB and Redis; the client never talks to either data store directly, always mediating through the REST/Socket.IO layer. Concurrent \emph{reads} are unrestricted and require no coordination (both MongoDB and Redis handle concurrent reads natively). Concurrent \emph{writes} are expected and must be explicitly coordinated: this is precisely the motivation behind the two concurrency-control mechanisms of \cref{non-functional-requirements} --- optimistic locking detects conflicting concurrent writes to the \emph{same} Incident document, and the distributed lock prevents two operators from concurrently claiming the same Incident in the first place.
+\paragraph{Query and write patterns.} \texttt{api} pods are the only components that ever query or write MongoDB and Redis; the client never talks to either data store directly, always mediating through the REST/Socket.IO layer. Concurrent \emph{reads} are unrestricted and require no coordination (both MongoDB and Redis handle concurrent reads natively). Concurrent \emph{writes} are expected and must be explicitly coordinated: this is precisely the motivation behind the two concurrency-control mechanisms of \cref{requirements} --- optimistic locking (NFR1) detects conflicting concurrent writes to the \emph{same} Incident document, and the distributed lock (FR4) prevents two operators from concurrently claiming the same Incident in the first place.
  
 \paragraph{Shared data.} The Incidents collection is, by design, shared read/write state across every \texttt{api} replica --- this sharing is the entire point of keeping the application tier stateless and horizontally scalable. The same is true of the Redis keyspace: coordination only works if every replica observes the same lock and leadership state, which is why a single shared Redis instance (rather than one per pod) is a hard requirement, not an implementation convenience.
  
@@ -423,7 +401,7 @@ A third case has no originating pod at all: when a claim lock simply \emph{expir
   \item \textbf{Probes.} The liveness probe (\texttt{/api/health}) is shallow and the readiness probe (\texttt{/api/ready}) is deep: it checks MongoDB, Redis and the pod's own Change Stream. A failing dependency therefore takes a pod out of the Service without restarting it.
   \item \textbf{Leases.} Claims and leadership are Redis keys with a TTL: a crashed holder needs no failure detector, because its lock simply expires.
   \item \textbf{Connection heartbeat.} Socket.IO's ping/pong detects dead connections, which keeps the presence list computed with \texttt{io.fetchSockets()} correct.
-  \item \textbf{Client retries.} The Socket.IO client reconnects automatically, and the resynchronization-generation counter (NFR7) discards out-of-date snapshots.
+  \item \textbf{Client retries.} The Socket.IO client reconnects automatically, and the resynchronization-generation counter (NFR5) discards out-of-date snapshots.
   \item \textbf{Change Stream recovery.} A broken stream is rebuilt with exponential backoff (1\,s doubling up to 30\,s) and \texttt{resumeAfter}, so the changes made during the outage are replayed. If the resume token is no longer in the oplog, the stream restarts from the present and the pod sends \texttt{resync\_required} to its clients. If the stream is still down after 20\,s, the pod disconnects its clients so that they reconnect to a healthy pod.
 \end{itemize}
  
@@ -433,7 +411,7 @@ A third case has no originating pod at all: when a claim lock simply \emph{expir
   \item \textbf{Backend crash.} An \texttt{api} pod that dies is restarted by Kubernetes, and one that hangs is restarted when its shallow liveness probe fails. Nothing is lost with it: claims and leadership live in Redis, and the leadership passes to another pod once the 15-second lease expires. Its WebSocket clients reconnect through the Ingress to another replica and rehydrate, while a REST request in flight fails and the client reports it as a network error. A failure to reach MongoDB or Redis \emph{at startup}, instead, is fatal by design (\texttt{process.exit(1)}): the pod is restarted rather than serving traffic half-initialized.
   \item \textbf{Redis failure.} The Redis clients reconnect on their own, and the commands issued in the meantime wait in their offline queue. The readiness probe's \texttt{PING} therefore times out, every \texttt{api} pod leaves the Service without being restarted, and the board stays unavailable until Redis returns; after a restart the active claims are lost, and the leadership is re-elected at the next tick (\cref{ds-features}).
   \item \textbf{MongoDB failure.} The loss of a secondary is invisible. The loss of the primary suspends reads and writes until the election: the driver waits for the new primary, retries a failed read or write once, and resumes the Change Streams from their tokens on its own; the errors it cannot resume are left to the pod's Change Stream recovery described above. If the whole Replica Set is down, readiness fails on every pod, as with Redis.
-  \item \textbf{REST API errors.} Every REST handler catches its errors and answers with a specific status --- \texttt{400}/\texttt{404} for invalid input, \texttt{401} for a missing or invalid token or wrong credentials, \texttt{409} for a lock, version or transition conflict, \texttt{500} otherwise --- instead of crashing the process. On the frontend, every action checks the response and shows a notification on failure, distinguishing the server's message from a network error and tolerating bodies that are not JSON (e.g., a \texttt{502} from the Ingress); a token rejected at the WebSocket handshake sends the operator back to the login form.
+  \item \textbf{REST API errors.} Every REST handler catches its errors and answers with a specific status --- \texttt{400}/\texttt{404} for invalid input, \texttt{401} for a missing or invalid token or wrong credentials, \texttt{409} for a lock, version or transition conflict or an already registered username, \texttt{500} otherwise --- instead of crashing the process. On the frontend, every action checks the response and shows a notification on failure, distinguishing the server's message from a network error and tolerating bodies that are not JSON (e.g., a \texttt{502} from the Ingress); a token rejected at the WebSocket handshake sends the operator back to the login form.
 \end{itemize}
  
 \subsection{Availability}\label{availability}
@@ -446,7 +424,7 @@ A third case has no originating pod at all: when a claim lock simply \emph{expir
 %
 \begin{itemize}
   \item If an \texttt{api} pod loses connectivity to Redis or MongoDB, or its Change Stream cannot be re-established, \texttt{/api/ready} starts failing and the pod leaves the Service's endpoints without being killed, rejoining once connectivity returns; new requests reach only pods that can serve them correctly. Its open WebSockets are moved only when the Change Stream is what failed (after 20\,s): a pod cut off from Redis alone keeps its clients, which miss the lock and presence events published meanwhile, a divergence bounded by the claims' 60-second TTL.
-  \item If the leader is cut off from Redis, it can no longer renew its lease and stops escalating, and another pod takes over within 15\,s. If it is cut off from MongoDB alone, it keeps the lease while its escalation scans fail, so escalation is suspended cluster-wide until the partition heals: no data is lost, since overdue tickets are escalated at the next successful scan.
+  \item If the leader is cut off from Redis, it can no longer renew its lease and stops escalating, and another pod takes over within about 25\,s (the 15\,s lease, plus up to one 10\,s tick). If it is cut off from MongoDB alone, it keeps the lease while its escalation scans fail, so escalation is suspended cluster-wide until the partition heals: no data is lost, since overdue tickets are escalated at the next successful scan.
   \item A MongoDB secondary partitioned from the primary falls behind and resynchronizes once the partition heals; clients do not notice, since every read goes to the primary.
   \item A primary partitioned from the majority steps down, so the minority side serves neither reads nor writes rather than risk divergent incident data (\textbf{CP}). The writes it accepted but could not replicate were never acknowledged, since acknowledgement requires a majority, and are rolled back when it rejoins.
 \end{itemize}
@@ -455,7 +433,7 @@ A third case has no originating pod at all: when a claim lock simply \emph{expir
  
 \paragraph{Authentication.} Operators register with a username and a password of at least 8 characters; the password is stored only as a bcrypt hash, and the uniqueness of the username is enforced by a unique index rather than by an application-level check, which would race across replicas. Login answers with the same error for an unknown user and a wrong password, so it does not reveal which usernames exist, and issues a JWT (subject: the username, validity: 12 hours) signed with a secret shared by every \texttt{api} replica through a Kubernetes \texttt{Secret}. The token is required on every REST call (\texttt{Authorization: Bearer}) and on the Socket.IO handshake, and any pod can verify it locally: no session state is kept on the server. The browser keeps it in \texttt{sessionStorage}, so it survives a page reload but not the closing of the tab. The known limits are deliberate simplifications (\cref{ds-features}, \emph{Security, Trust}): authentication is single-factor, there is no password reset, account lockout or rate limiting on login, and the WebSocket token is checked only at the handshake, so an open connection outlives the expiry of its token.
 
-\paragraph{Authorization.} There is a single role: every authenticated operator can create incidents and claim any unclaimed one that is not yet resolved. Releasing and resolving, instead, require \emph{owning} the incident's Redis lock: the server answers \texttt{409} both when the lock belongs to someone else and when there is no lock at all, so the mutual exclusion cannot be bypassed by simply not claiming (NFR2). The lock therefore acts as a capability for a single incident, and it is anchored to a verified identity: its value, like \texttt{createdBy} and \texttt{closedBy}, is always the username taken from the caller's JWT and never from the request body.
+\paragraph{Authorization.} There is a single role: every authenticated operator can create incidents and claim any unclaimed one that is not yet resolved. Releasing and resolving, instead, require \emph{owning} the incident's Redis lock: the server answers \texttt{409} both when the lock belongs to someone else and when there is no lock at all, so the mutual exclusion cannot be bypassed by simply not claiming. The lock therefore acts as a capability for a single incident, and it is anchored to a verified identity: its value, like \texttt{createdBy} and \texttt{closedBy}, is always the username taken from the caller's JWT and never from the request body.
 
 \paragraph{Input validation.} Every route validates its input before touching the stores: incident titles must be non-empty and at most 200 characters, a status must belong to the allowed set and follow an allowed transition (a closed incident cannot be reopened), and the optimistic-locking \texttt{version} is mandatory. Incident identifiers are checked for format and existence before being turned into a Redis key, which prevents a client from creating arbitrary keys or announcing a lock on an incident that does not exist.
 
@@ -594,7 +572,7 @@ All validation was performed by \textbf{manual testing} on the live Minikube clu
   \item \emph{(Expected)} A repeated claim by the holder answers \texttt{200} and resets the TTL to about 60000\,ms; the other user still gets \texttt{409}.
 \end{itemize}
 
-\subsubsection{Real-Time Propagation, Mutual Exclusion and Resolution (FR2, FR3, FR6, NFR2, NFR9)}
+\subsubsection{Real-Time Propagation, Mutual Exclusion and Resolution (FR2, FR3, FR4, FR6, NFR6)}
 
 \begin{itemize}
   \item \textbf{Procedure:} while watching bob's board, create and claim an incident as alice; as bob, bypassing the UI, send \texttt{PATCH /api/incidents/<id>} with \texttt{\{"status":"closed","version":1\}}; then resolve it as alice from the UI.
@@ -611,7 +589,7 @@ All validation was performed by \textbf{manual testing} on the live Minikube clu
   \item \textbf{Note:} the earlier procedure, two consecutive resolutions with the same version, no longer reaches the version check, because the second request is now rejected by the lock check first.
 \end{itemize}
 
-\subsubsection{SLA Escalation, Exactly Once (FR7, NFR5)}
+\subsubsection{SLA Escalation (FR7)}
 
 \begin{itemize}
   \item \textbf{Procedure:} with $\geq 3$ \texttt{api} pods, leave an incident open for over 5~minutes, watching the boards and \texttt{kubectl logs -l app=api -n app}.
@@ -619,7 +597,7 @@ All validation was performed by \textbf{manual testing} on the live Minikube clu
   \item \textbf{Result:} passed. Only the holder of \texttt{leader:escalation} runs the task; the Change Stream propagates the result.
 \end{itemize}
 
-\subsubsection{Presence (FR8, NFR8)}
+\subsubsection{Presence (FR8)}
 
 \begin{itemize}
   \item \textbf{Procedure:} with alice and bob connected, close bob's tab; reconnect him, then force-delete his pod (\texttt{--force --grace-period=0}) so that no \texttt{disconnect} is emitted.
@@ -627,7 +605,7 @@ All validation was performed by \textbf{manual testing} on the live Minikube clu
   \item \textbf{Result:} passed. Presence is recomputed with \texttt{io.fetchSockets()} at every connection and disconnection, and a dead pod no longer answers it: here bob's reconnection to another pod triggered the recomputation that dropped the stale sockets. Without any later connection event, clients would keep the stale list until the next one. The earlier hand-maintained Redis hash failed this test with entries that never expired.
 \end{itemize}
 
-\subsubsection{API Pod Loss and Reconnection (NFR3, NFR7)}
+\subsubsection{API Pod Loss and Reconnection (NFR2, NFR5)}
 
 \begin{itemize}
   \item \textbf{Procedure:} delete one \texttt{api} pod and immediately create and claim an incident; then, with a client connected, run \texttt{kubectl rollout restart deployment/api -n app}.
@@ -637,7 +615,7 @@ All validation was performed by \textbf{manual testing} on the live Minikube clu
   \item \emph{(Expected)} A pod whose Change Stream has died answers \texttt{503} on \texttt{/api/ready} and leaves the Service without restarting; its clients are moved to a ready pod and it rejoins once the cursor is rebuilt. A non-resumable failure is hard to inject from outside, since the driver silently retries resumable ones such as a \texttt{mongo} pod deletion.
 \end{itemize}
 
-\subsubsection{Data-Tier Failover (NFR4)}
+\subsubsection{Data-Tier Failover (NFR3)}
 
 \begin{itemize}
   \item \textbf{Procedure:} delete the pod of the MongoDB primary (\texttt{rs.hello().primary}) and follow \texttt{rs.status()}.
@@ -645,7 +623,7 @@ All validation was performed by \textbf{manual testing} on the live Minikube clu
   \item \textbf{Result:} passed, with the election in about 15~s. A direct deletion is not an eviction, so the PodDisruptionBudget plays no part here.
 \end{itemize}
 
-\subsubsection{Horizontal Scalability (NFR6)}
+\subsubsection{Horizontal Scalability (NFR4)}
 
 \begin{itemize}
   \item \textbf{Procedure:} load the \texttt{api} pods with a tight \texttt{curl} loop and watch \texttt{kubectl get hpa api-hpa -n app -w}.
@@ -796,7 +774,7 @@ Connection problems require no action from the operator. If the connection drops
 
 \subsection{Role}
 
-The project was carried out individually, so every part of it is my own work: the elicitation of the requirements, the design of the architecture and of the coordination mechanisms, the implementation of the \texttt{api} backend and of the \texttt{web} frontend, the Kubernetes manifests, the manual validation on the Minikube cluster, and this report. Without a team there was also no reviewer: the defects recounted in \cref{ds-features} were found by re-reading my own code against the properties it was meant to guarantee.
+The project was carried out individually, so every part of it is my own work: the elicitation of the requirements, the design of the architecture and of the coordination mechanisms, the implementation of the \texttt{api} backend and of the \texttt{web} frontend, the Kubernetes manifests, the manual validation on the Minikube cluster, and this report. Without a team there was also no reviewer: the coordination defects corrected during development were found by re-reading my own code against the properties it was meant to guarantee.
 
 \subsection{Strengths}
 

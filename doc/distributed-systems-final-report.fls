@@ -131,8 +131,8 @@ INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/public/cm/cmmi12.tfm
 INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/public/cm/cmsy10.tfm
 INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/public/cm/cmtt12.tfm
 INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/public/cm/cmssbx10.tfm
-INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/public/cm/cmbx10.tfm
 INPUT /usr/local/texlive/2026/texmf-var/fonts/map/pdftex/updmap/pdftex.map
+INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/public/cm/cmbx10.tfm
 INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/jknappen/ec/tcrm1095.tfm
 INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/public/cm/cmtt10.tfm
 INPUT /usr/local/texlive/2026/texmf-dist/fonts/tfm/public/cm/cmti10.tfm
@@ -175,11 +175,6 @@ INPUT ./figures/diagrammi-sequenza.pdf
 INPUT ./figures/diagrammi-sequenza.pdf
 INPUT ./figures/diagrammi-sequenza.pdf
 INPUT ./figures/diagrammi-sequenza.pdf
-INPUT ./figures/diagrammi-stato.pdf
-INPUT ./figures/diagrammi-stato.pdf
-INPUT ./figures/diagrammi-stato.pdf
-INPUT ./figures/diagrammi-stato.pdf
-INPUT ./figures/diagrammi-stato.pdf
 INPUT ./figures/diagrammi-stato.pdf
 INPUT ./figures/diagrammi-stato.pdf
 INPUT ./figures/diagrammi-stato.pdf
