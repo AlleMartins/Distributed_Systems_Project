@@ -238,7 +238,7 @@ The infrastructure is composed of the following components, all containerized an
   \item \textbf{Application servers:} Express.js + Socket.IO processes (\texttt{api} Deployment), stateless with respect to domain state, horizontally scaled 3--10 replicas by a \texttt{HorizontalPodAutoscaler} on CPU utilization, and protected by a \texttt{PodDisruptionBudget} (\texttt{maxUnavailable: 1}, a relative bound that adapts to the current replica count).
   \item \textbf{Reverse proxy / load balancer:} the Kubernetes Ingress (Nginx controller, enabled as a Minikube addon), which performs path-based routing (\texttt{/} to \texttt{web}, \texttt{/api/*} and \texttt{/socket.io/*} to \texttt{api}) and cookie-based sticky sessions across the \texttt{api} replicas.
   \item \textbf{Database:} a 3-node MongoDB Replica Set (\texttt{StatefulSet}), the durable system of record for both incidents and operator credentials (the \texttt{incidents} and \texttt{users} collections). Each member owns a \texttt{PersistentVolumeClaim} created from the StatefulSet's \texttt{volumeClaimTemplates}, so its data survives the recreation of its pod, and a \texttt{PodDisruptionBudget} (\texttt{minAvailable: 2}) prevents voluntary disruptions from taking away the majority needed to elect a primary.
-  \item \textbf{Message broker / coordination store:} a single Redis instance, serving three distinct roles simultaneously --- the Socket.IO Pub/Sub adapter (cross-pod WebSocket broadcast), the distributed-lock store (incident claims), and the leader-election store (background task). It runs as a one-replica Deployment with no persistence and no probes of its own, which makes it the only component without redundancy: since every \texttt{api} readiness probe pings Redis, its failure takes \emph{all} \texttt{api} replicas out of the Service at once. This single point of failure is a deliberate simplification of the project, not an oversight; replacing it with Redis Sentinel or Redis Cluster is discussed in \cref{future-works}.
+  \item \textbf{Message broker / coordination store:} a single Redis instance, serving three distinct roles simultaneously --- the Socket.IO Pub/Sub adapter (cross-pod WebSocket broadcast), the distributed-lock store (incident claims), and the leader-election store (background task). It runs as a one-replica Deployment with no persistence and no probes of its own, which makes it the only component without redundancy: since every \texttt{api} readiness probe pings Redis, its failure takes \emph{all} \texttt{api} replicas out of the Service at once. This single point of failure is a deliberate simplification of the project, not an oversight.
 \end{itemize}
 %
 
@@ -383,13 +383,13 @@ Within the publish/subscribe direction, two further sub-patterns are used depend
 
 \subsection{Data and Consistency Issues}\label{data-and-consistency-issues}
  
-\paragraph{What is stored, and where.} Incidents are the only data that must persist beyond a single request or connection; they are stored in \textbf{MongoDB} as documents. The document model was chosen because incidents are naturally semi-structured records whose schema evolved incrementally over the project's development (e.g., the \texttt{escalated} status and the \texttt{closedBy} field were both introduced after the initial design) without requiring a formal migration step. Coordination data (locks, leadership) is stored in \textbf{Redis} as plain key-value pairs, chosen because the access pattern is a pure read/write/expire on independent keys with no relational structure, and because lock contention needs sub-millisecond latency that an in-memory store provides naturally.
+\paragraph{What is stored, and where.} Incidents and operator accounts are the only data that must persist beyond a single request or connection; they are stored in \textbf{MongoDB} as documents, in the \texttt{incidents} and \texttt{users} collections. The document model was chosen because incidents are naturally semi-structured records whose schema evolved incrementally over the project's development (e.g., the \texttt{escalated} status and the \texttt{closedBy} field were both introduced after the initial design) without requiring a formal migration step. Coordination data (locks, leadership) is stored in \textbf{Redis} as plain key-value pairs, chosen because the access pattern is a pure read/write/expire on independent keys with no relational structure, and because lock contention needs sub-millisecond latency that an in-memory store provides naturally.
  
 \paragraph{Query and write patterns.} \texttt{api} pods are the only components that ever query or write MongoDB and Redis; the client never talks to either data store directly, always mediating through the REST/Socket.IO layer. Concurrent \emph{reads} are unrestricted and require no coordination (both MongoDB and Redis handle concurrent reads natively). Concurrent \emph{writes} are expected and must be explicitly coordinated: this is precisely the motivation behind the two concurrency-control mechanisms of \cref{requirements} --- optimistic locking (NFR1) detects conflicting concurrent writes to the \emph{same} Incident document, and the distributed lock (FR4) prevents two operators from concurrently claiming the same Incident in the first place.
  
-\paragraph{Shared data.} The Incidents collection is, by design, shared read/write state across every \texttt{api} replica --- this sharing is the entire point of keeping the application tier stateless and horizontally scalable. The same is true of the Redis keyspace: coordination only works if every replica observes the same lock and leadership state, which is why a single shared Redis instance (rather than one per pod) is a hard requirement, not an implementation convenience.
+\paragraph{Shared data.} The \texttt{incidents} and \texttt{users} collections are, by design, shared read/write state across every \texttt{api} replica (which is why the uniqueness of usernames is enforced by a unique index rather than by any single replica, \cref{security}) --- this sharing is the entire point of keeping the application tier stateless and horizontally scalable. The same is true of the Redis keyspace: coordination only works if every replica observes the same lock and leadership state, which is why a single shared Redis instance (rather than one per pod) is a hard requirement, not an implementation convenience.
  
-\paragraph{Consistency model.} The system provides \textbf{strong consistency} for writes to the primary (a successful write is immediately visible to any subsequent read against the primary) and \textbf{eventual consistency} for propagation to connected clients: a change is always durably committed to MongoDB \emph{before} any client is notified of it, but different clients may observe the notification at slightly different times depending on Change-Stream and network latency. This asymmetry is a deliberate, accepted trade-off: the domain (a SOC dashboard) tolerates sub-second staleness in what operators \emph{see}, but never tolerates staleness or loss in what is actually \emph{recorded} as the incident's state.
+\paragraph{Consistency model.} The system provides \textbf{strong consistency} for writes to the primary (a successful write is immediately visible to any subsequent read against the primary) and \textbf{eventual consistency} for propagation to connected clients. A change to an incident is always durably committed to MongoDB \emph{before} any client is notified of it, since the Change Stream reports only majority-committed writes, but different clients may observe the notification at slightly different times depending on Change-Stream and network latency. Claims and presence take the other channel, the Redis Pub/Sub of the Socket.IO adapter: a claim is announced as soon as Redis has accepted it, and since Redis is not persistent it is volatile coordination state rather than a durable record; the natural expiry of a claim produces no event at all and is predicted by each client from the remaining TTL. This asymmetry is a deliberate, accepted trade-off: the domain (a SOC dashboard) tolerates sub-second staleness in what operators \emph{see}, but never tolerates staleness or loss in what is actually \emph{recorded} as the incident's state.
  
 \subsection{Fault-Tolerance}\label{fault-tolerance}
  
@@ -408,7 +408,7 @@ Within the publish/subscribe direction, two further sub-patterns are used depend
 \paragraph{Error handling.} Four classes of failure are handled, each by the cheapest mechanism that recovers from it:
 %
 \begin{itemize}
-  \item \textbf{Backend crash.} An \texttt{api} pod that dies is restarted by Kubernetes, and one that hangs is restarted when its shallow liveness probe fails. Nothing is lost with it: claims and leadership live in Redis, and the leadership passes to another pod once the 15-second lease expires. Its WebSocket clients reconnect through the Ingress to another replica and rehydrate, while a REST request in flight fails and the client reports it as a network error. A failure to reach MongoDB or Redis \emph{at startup}, instead, is fatal by design (\texttt{process.exit(1)}): the pod is restarted rather than serving traffic half-initialized.
+  \item \textbf{Backend crash.} An \texttt{api} pod that dies is restarted by Kubernetes, and one that hangs is restarted when its shallow liveness probe fails. Nothing is lost with it: claims and leadership live in Redis, and the leadership passes to another pod once the 15-second lease expires. Its WebSocket clients reconnect through the Ingress to another replica and rehydrate, while a REST request in flight fails with an error from the Ingress (typically a \texttt{502}), which the client reports like any other server error; a mutation may already have been applied before the crash, in which case its effect still reaches every client through the Change Stream. A failure to reach MongoDB or Redis \emph{at startup}, instead, is fatal by design (\texttt{process.exit(1)}): the pod is restarted rather than serving traffic half-initialized.
   \item \textbf{Redis failure.} The Redis clients reconnect on their own, and the commands issued in the meantime wait in their offline queue. The readiness probe's \texttt{PING} therefore times out, every \texttt{api} pod leaves the Service without being restarted, and the board stays unavailable until Redis returns; after a restart the active claims are lost, and the leadership is re-elected at the next tick (\cref{ds-features}).
   \item \textbf{MongoDB failure.} The loss of a secondary is invisible. The loss of the primary suspends reads and writes until the election: the driver waits for the new primary, retries a failed read or write once, and resumes the Change Streams from their tokens on its own; the errors it cannot resume are left to the pod's Change Stream recovery described above. If the whole Replica Set is down, readiness fails on every pod, as with Redis.
   \item \textbf{REST API errors.} Every REST handler catches its errors and answers with a specific status --- \texttt{400}/\texttt{404} for invalid input, \texttt{401} for a missing or invalid token or wrong credentials, \texttt{409} for a lock, version or transition conflict or an already registered username, \texttt{500} otherwise --- instead of crashing the process. On the frontend, every action checks the response and shows a notification on failure, distinguishing the server's message from a network error and tolerating bodies that are not JSON (e.g., a \texttt{502} from the Ingress); a token rejected at the WebSocket handshake sends the operator back to the login form.
@@ -431,13 +431,9 @@ Within the publish/subscribe direction, two further sub-patterns are used depend
  
 \subsection{Security}\label{security}
  
-\paragraph{Authentication.} Operators register with a username and a password of at least 8 characters; the password is stored only as a bcrypt hash, and the uniqueness of the username is enforced by a unique index rather than by an application-level check, which would race across replicas. Login answers with the same error for an unknown user and a wrong password, so it does not reveal which usernames exist, and issues a JWT (subject: the username, validity: 12 hours) signed with a secret shared by every \texttt{api} replica through a Kubernetes \texttt{Secret}. The token is required on every REST call (\texttt{Authorization: Bearer}) and on the Socket.IO handshake, and any pod can verify it locally: no session state is kept on the server. The browser keeps it in \texttt{sessionStorage}, so it survives a page reload but not the closing of the tab. The known limits are deliberate simplifications (\cref{ds-features}, \emph{Security, Trust}): authentication is single-factor, there is no password reset, account lockout or rate limiting on login, and the WebSocket token is checked only at the handshake, so an open connection outlives the expiry of its token.
+\paragraph{Authentication.} Operators register with a username and a password of at least 8 characters; the password is stored only as a bcrypt hash, and the uniqueness of the username is enforced by a unique index rather than by an application-level check, which would race across replicas. Login answers with the same error for an unknown user and a wrong password, so its message does not tell the two cases apart (usernames can still be enumerated through registration, which reports a name already taken, and through the response time, since no hash is compared for an unknown user), and issues a JWT (subject: the username, validity: 12 hours) signed with a secret shared by every \texttt{api} replica through a Kubernetes \texttt{Secret}. The token is required on every REST call (\texttt{Authorization: Bearer}) and on the Socket.IO handshake, and any pod can verify it locally: no session state is kept on the server. The browser keeps it in \texttt{sessionStorage}, so it survives a page reload but not the closing of the tab. The known limits are deliberate simplifications: authentication is single-factor, there is no password reset, account lockout or rate limiting on login, and the WebSocket token is checked only at the handshake, so an open connection outlives the expiry of its token.
 
 \paragraph{Authorization.} There is a single role: every authenticated operator can create incidents and claim any unclaimed one that is not yet resolved. Releasing and resolving, instead, require \emph{owning} the incident's Redis lock: the server answers \texttt{409} both when the lock belongs to someone else and when there is no lock at all, so the mutual exclusion cannot be bypassed by simply not claiming. The lock therefore acts as a capability for a single incident, and it is anchored to a verified identity: its value, like \texttt{createdBy} and \texttt{closedBy}, is always the username taken from the caller's JWT and never from the request body.
-
-\paragraph{Input validation.} Every route validates its input before touching the stores: incident titles must be non-empty and at most 200 characters, a status must belong to the allowed set and follow an allowed transition (a closed incident cannot be reopened), and the optimistic-locking \texttt{version} is mandatory. Incident identifiers are checked for format and existence before being turned into a Redis key, which prevents a client from creating arbitrary keys or announcing a lock on an incident that does not exist.
-
-\paragraph{Cryptography and secrets.} Cryptography is used only for authentication: bcrypt for passwords and HMAC-signed JWTs for tokens. Nothing travels encrypted: the Ingress serves plain HTTP, so passwords and tokens cross the network in clear, and the traffic between the \texttt{api} pods and MongoDB or Redis is unencrypted as well; neither store requires authentication, and no data is encrypted at rest. Moreover, the \texttt{Secret} committed in the repository holds a placeholder value meant for the local demo, which a real deployment must generate outside the repository. Transport and at-rest encryption are listed among the future works (\cref{future-works}).
  
 \section{Implementation}\label{implementation}
 
@@ -447,7 +443,7 @@ Within the publish/subscribe direction, two further sub-patterns are used depend
   \item \textbf{Frontend:} a single-page application in Vue~3 (Composition API, \texttt{<script setup>}), built with Vite~8. \texttt{socket.io-client}~4 keeps the real-time channel, Chart.js~4 (through \texttt{vue-chartjs}~5) draws the dashboard chart, and \texttt{vue-toastification}~2 shows the notifications.
   \item \textbf{Backend:} Node.js~20 with Express~5 for the REST API and Socket.IO~4 for the WebSocket server, extended across pods by \texttt{@socket.io/redis-adapter}~8. Authentication uses \texttt{jsonwebtoken} and \texttt{bcryptjs}; the stores are reached through the official \texttt{mongodb}~7 and \texttt{redis}~6 (node-redis) drivers.
   \item \textbf{Database:} MongoDB~6 as a 3-member replica set, the durable store of incidents and users and the source of the Change Streams; Redis~7 as a single in-memory instance for the claim locks, the leader lease and the Socket.IO Pub/Sub.
-  \item \textbf{Distributed infrastructure:} Kubernetes, validated on Minikube, with an ingress-nginx Ingress and a HorizontalPodAutoscaler fed by \texttt{metrics-server} (\cref{orchestration}).
+  \item \textbf{Distributed infrastructure:} Kubernetes, validated on Minikube, with an ingress-nginx Ingress and a HorizontalPodAutoscaler fed by \texttt{metrics-server} (\cref{orchestration,cluster-setup}).
   \item \textbf{Containerization:} Docker. The \texttt{api} image is based on \texttt{node:20-alpine} with production dependencies only; the \texttt{web} image is a multi-stage build that compiles the bundle on \texttt{node:20-alpine} and serves it with \texttt{nginx:alpine}. MongoDB and Redis use the official \texttt{mongo:6} and \texttt{redis:7} images.
   \item \textbf{API:} REST over HTTP with JSON bodies under \texttt{/api}, authenticated with a \texttt{Bearer} JWT, and server-to-client events over Socket.IO (\cref{network-protocols}).
 \end{itemize}
@@ -483,7 +479,7 @@ WebSocket was chosen over polling because the design requires near-real-time pro
 
 \subsection{In-Transit Data Representation}\label{data-representation}
 
-\textbf{JSON} is the only application-level serialization format. REST request and response bodies are JSON (e.g., \texttt{\{"status": "resolved", "version": 3\}}), parsed by \texttt{express.json()} and returned via \texttt{res.json()}; Socket.IO events carry the JSON payloads listed in \cref{network-protocols}.
+\textbf{JSON} is the only application-level serialization format. REST request and response bodies are JSON (e.g., \texttt{\{"status": "closed", "version": 3\}}), parsed by \texttt{express.json()} and returned via \texttt{res.json()}; Socket.IO events carry the JSON payloads listed in \cref{network-protocols}.
 
 \subsection{Database Querying}\label{database-querying}
 
@@ -537,7 +533,7 @@ MongoDB is queried through the fluent API of the official Node.js driver.
     \hline
     \texttt{mongo.yaml} & headless Service, ConfigMap, StatefulSet, Job, PDB & 3 members \texttt{--replSet rs0}, 1\,GiB PVC each; probes \texttt{ping} via \texttt{mongosh}; idempotent \texttt{mongo-rs-init} Job (\texttt{backoffLimit: 5}); PDB \texttt{minAvailable: 2} \\
     \texttt{redis.yaml} & Deployment, \texttt{ClusterIP} Service & 1 replica, port 6379, no persistence, no probes \\
-    \texttt{jwt-secret.yaml} & Secret & \texttt{JWT\_SECRET}, a placeholder for the local demo (\cref{security}) \\
+    \texttt{jwt-secret.yaml} & Secret & \texttt{JWT\_SECRET}, a placeholder for the local demo \\
     \texttt{api.yaml} & Deployment, Service, PDB & 3 replicas; \texttt{MONGO\_URL}, \texttt{REDIS\_URL}, \texttt{CORS\_ORIGIN}, and \texttt{JWT\_SECRET} from the Secret; CPU request 100m, limit 500m; liveness \texttt{/api/health} every 10\,s, readiness \texttt{/api/ready} every 5\,s with \texttt{failureThreshold: 3}; no \texttt{preStop}; PDB \texttt{maxUnavailable: 1} \\
     \texttt{hpa.yaml} & HorizontalPodAutoscaler & \texttt{api} between 3 and 10 replicas, 80\% average CPU \\
     \texttt{web.yaml} & Deployment, Service, PDB & 2 replicas; rolling update with \texttt{maxUnavailable: 0}; \texttt{preStop} \texttt{sleep 5}; probes on \texttt{/}; PDB \texttt{minAvailable: 1} \\
@@ -561,7 +557,7 @@ Two values are tied to each other rather than to a design choice. The readiness 
 \section{Validation}\label{validation}
 \subsection{Acceptance Tests}\label{acceptance-test}
 
-All validation was performed by \textbf{manual testing} on the live Minikube cluster, with several browser sessions and \texttt{curl}; automating it would mean coupling browser automation with \texttt{kubectl}-driven fault injection, beyond the time budget of a single-developer project. Tests are grouped by mechanism, each listing the requirements it covers. Results were observed on the cluster unless marked \emph{(expected)}: those steps cover behaviour introduced after the last validation round. \texttt{ALICE\_TOKEN} and \texttt{BOB\_TOKEN} are JWTs from \texttt{POST /api/auth/login}; the identity behind every write is always taken from the token, never from the body.
+All validation was performed by \textbf{manual testing} on the live Minikube cluster, with several browser sessions and \texttt{curl}; automating it would mean coupling browser automation with \texttt{kubectl}-driven fault injection, beyond the time budget of a single-developer project. Tests are grouped by mechanism, each listing the requirements it covers. Results were observed on the cluster unless marked \emph{(expected)}: those steps cover behaviour introduced after the last validation round. The identity behind every write is always taken from the caller's JWT, never from the body.
 
 \subsubsection{Claim and Release (FR4, FR5)}
 
@@ -648,6 +644,7 @@ Checked directly in the browser, as they involve no distributed mechanism:
   \item \textbf{Docker Desktop} (or Docker Engine)
   \item \textbf{Minikube}
   \item \textbf{kubectl}
+  \item \textbf{Git}
   \item \textbf{Node.js} 20.19+ or 22.12+, with npm, only to run the API or the frontend outside containers. The bounds come from the MongoDB driver~7 (\texttt{>=20.19.0}) and Vite~8 (\texttt{\textasciicircum 20.19.0 || >=22.12.0}).
 \end{itemize}
 
@@ -708,7 +705,7 @@ This section describes the application from the operator's point of view, assumi
 
 \subsection{Accessing the Board}\label{ug-login}
 
-A first-time operator clicks ``Registrati'' on the login card, chooses a username and a password of at least 8 characters, and is brought back to the login form. Logging in with those credentials (``Accedi'') opens the dashboard and establishes the real-time connection in the background; wrong credentials are rejected with an inline error. The session survives a page reload and ends when the tab is closed, when the operator clicks ``Esci'' in the header, or after 12~hours. Both forms are shown in \cref{fig:ug-auth}.
+A first-time operator clicks ``Registrati'' on the login card and chooses a username and a password of at least 8 characters; a successful registration logs the operator in directly. Later visits use the same credentials (``Accedi''). Either way the dashboard opens and the real-time connection is established in the background; wrong credentials are rejected with an inline error. The session survives a page reload and ends when the tab is closed, when the operator clicks ``Esci'' in the header, or after 12~hours. Both forms are shown in \cref{fig:ug-auth}.
 
 \begin{figure}[htbp]
   \centering
@@ -727,7 +724,7 @@ The dashboard is organized in four rows, the first three of which are shown in \
   \centering
   % Il trim toglie in alto le schede, la barra degli indirizzi e i preferiti del browser, ai lati i margini vuoti (PNG a 72 dpi: 1 px = 1 bp).
   \includegraphics[width=\textwidth,trim=120 0 140 110,clip]{figures/board.png}
-  \caption{Upper part of the dashboard: header with the live-sync indicator, KPI cards, status chart, creation form and filters.}
+  \caption{Upper part of the dashboard: header with the ``Live Sync Active'' label, KPI cards, status chart, creation form and filters.}
   \label{fig:ug-dashboard}
 \end{figure}
 
@@ -746,13 +743,13 @@ The dashboard is organized in four rows, the first three of which are shown in \
   \end{itemize}
 \end{enumerate}
 %
-The ``Live Sync Active'' indicator in the header shows that the real-time connection is up.
+The ``Live Sync Active'' label in the header is static: it does not reflect the state of the real-time connection, which recovers on its own (\cref{ug-resilience}).
 
 \subsection{Incident Lifecycle}\label{ug-lifecycle}
 
 \paragraph{Create.} Type a title in ``Register New Incident'' and press \texttt{Enter} or ``Submit''. The card appears in ``Open'' on every connected client, without any refresh.
 
-\paragraph{Claim.} Click ``Claim Ticket'' (or ``Claim Escalation''). The card moves to ``In Progress'' on every client, and only the claimant gets the action buttons. If another operator got there first, an error toast names the current holder and nothing changes. A claim lasts \textbf{60~seconds}: if it is neither resolved nor released by then, the card returns to its column on every client, including the holder's, and anyone can claim it again. Reloading the page does not lose a claim that is still valid.
+\paragraph{Claim.} Click ``Claim Ticket'' (or ``Claim Escalation''). The card moves to ``In Progress'' on every client, and only the claimant gets the action buttons. If another operator got there first, an error toast reports that the incident is already claimed and nothing changes; the holder's name is already on the card. A claim lasts \textbf{60~seconds}: if it is neither resolved nor released by then, the card returns to its column on every client, including the holder's, and anyone can claim it again. Reloading the page does not lose a claim that is still valid.
 
 \paragraph{Release.} Click ``Release'' to give the incident back without resolving it. The card returns to ``Open'' or ``Escalated'' and is immediately claimable by others.
 
@@ -789,11 +786,11 @@ The project was carried out individually, so every part of it is my own work: th
 \subsection{Weaknesses}
 
 \begin{itemize}
-  \item \textbf{Redis is a single point of failure.} It is the only component without redundancy, and its loss makes the whole board unavailable rather than read-only; having no persistence, a restart also drops every active claim (\cref{future-works}).
+  \item \textbf{Redis is a single point of failure.} It is the only component without redundancy, and its loss makes the whole board unavailable rather than read-only; having no persistence, a restart also drops every active claim.
   \item \textbf{Leader election is minimal.} Without a fencing token, a leader paused beyond the 15-second TTL can overlap with its successor, harmless only because escalation is idempotent. And since the lease lives in Redis alone, a leader cut off from MongoDB keeps it while its scans fail, stopping escalation cluster-wide until the partition heals (\cref{availability}).
   \item \textbf{Validation is manual.} There is no automated test suite, so every regression check means re-running the scenarios by hand, and the checks added after the last validation round --- the Change Stream as a readiness dependency among them --- are documented as expected behaviour rather than observed (\cref{acceptance-test}).
   \item \textbf{Availability is pod-level, not node-level.} Minikube runs a single node: the replicas protect against crashes and rollouts, not against the loss of the machine.
-  \item \textbf{Minimal security.} No TLS between components, a single role, no rate limiting on login, and a WebSocket session that outlives the expiry of its token (\cref{security}).
+  \item \textbf{Minimal security.} No TLS between components, a single role, no rate limiting on login, and a WebSocket session that outlives the expiry of its token (\cref{security,future-works}).
   \item \textbf{Scalability limits.} Each \texttt{api} pod holds its own Change Stream cursor on the primary, and every reconnection downloads the whole, unpaginated board.
 \end{itemize}
 
@@ -804,8 +801,7 @@ distributed-systems aspects of the project. The most relevant candidates for fut
 
 \begin{itemize}
   \item \textbf{Transport security.} Traffic between the browser and the Ingress, and between the
-  \texttt{api} pods and their backing services (MongoDB, Redis), is currently unencrypted
-  (\cref{ds-features}). A production-grade deployment would terminate TLS at the Ingress and enable
+  \texttt{api} pods and their backing services (MongoDB, Redis), is currently unencrypted. A production-grade deployment would terminate TLS at the Ingress and enable
   TLS for the MongoDB Replica Set and Redis connections, plus encryption at rest for the MongoDB
   volumes.
 

@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.28)  13 OCT 2026 17:50
+This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026) (preloaded format=pdflatex 2026.3.28)  15 OCT 2026 18:10
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -404,7 +404,7 @@ Overfull \hbox (73.88515pt too wide) in paragraph at lines 238--239
 3--10 repli-cas by a \OT1/cmtt/m/n/10.95 HorizontalPodAutoscaler
  []
 
-<figures/architettura.pdf, id=77, 491.76123pt x 408.73302pt>
+<figures/architettura.pdf, id=76, 491.76123pt x 408.73302pt>
 File: figures/architettura.pdf Graphic file (type pdf)
 <use figures/architettura.pdf>
 Package pdftex.def Info: figures/architettura.pdf  used on input line 248.
@@ -424,7 +424,7 @@ title\OT1/cmr/m/n/10.95 , \OT1/cmtt/m/n/10.95 status $\OMS/cmsy/m/n/10.95 2 f[]
 \OML/cmm/m/it/10.95 ; []; []\OMS/cmsy/m/n/10.95 g$\OT1/cmr/m/n/10.95 ,
  []
 
-<figures/diagramma-classi.pdf, id=148, 455.94339pt x 359.32341pt>
+<figures/diagramma-classi.pdf, id=146, 455.94339pt x 359.32341pt>
 File: figures/diagramma-classi.pdf Graphic file (type pdf)
 <use figures/diagramma-classi.pdf>
 Package pdftex.def Info: figures/diagramma-classi.pdf  used on input line 272.
@@ -454,25 +454,25 @@ OT1/cmtt/m/n/10.95 incident[]unlocked\OT1/cmr/m/n/10.95 ,
  []
 
 [13]
-<figures/diagrammi-sequenza.pdf, id=200, page=1, 472.00241pt x 381.51534pt>
+<figures/diagrammi-sequenza.pdf, id=198, page=1, 472.00241pt x 381.51534pt>
 File: figures/diagrammi-sequenza.pdf Graphic file (type pdf)
 <use figures/diagrammi-sequenza.pdf, page 1>
 Package pdftex.def Info: figures/diagrammi-sequenza.pdf , page1 used on input l
 ine 316.
 (pdftex.def)             Requested size: 418.25555pt x 338.06892pt.
-<figures/diagrammi-sequenza.pdf, id=201, page=2, 472.00241pt x 404.27737pt>
+<figures/diagrammi-sequenza.pdf, id=199, page=2, 472.00241pt x 404.27737pt>
 File: figures/diagrammi-sequenza.pdf Graphic file (type pdf)
 <use figures/diagrammi-sequenza.pdf, page 2>
 Package pdftex.def Info: figures/diagrammi-sequenza.pdf , page2 used on input l
 ine 324.
 (pdftex.def)             Requested size: 418.25555pt x 358.23886pt.
-<figures/diagrammi-sequenza.pdf, id=202, page=3, 472.00241pt x 381.51534pt>
+<figures/diagrammi-sequenza.pdf, id=200, page=3, 472.00241pt x 381.51534pt>
 File: figures/diagrammi-sequenza.pdf Graphic file (type pdf)
 <use figures/diagrammi-sequenza.pdf, page 3>
 Package pdftex.def Info: figures/diagrammi-sequenza.pdf , page3 used on input l
 ine 332.
 (pdftex.def)             Requested size: 418.25555pt x 338.06892pt.
-<figures/diagrammi-sequenza.pdf, id=203, page=4, 472.00241pt x 259.58179pt>
+<figures/diagrammi-sequenza.pdf, id=201, page=4, 472.00241pt x 259.58179pt>
 File: figures/diagrammi-sequenza.pdf Graphic file (type pdf)
 <use figures/diagrammi-sequenza.pdf, page 4>
 Package pdftex.def Info: figures/diagrammi-sequenza.pdf , page4 used on input l
@@ -488,19 +488,19 @@ etchSockets()\OT1/cmr/m/n/10.95 ; events from their own Change
 
 [14 <./figures/diagrammi-sequenza.pdf>] [15 <./figures/diagrammi-sequenza.pdf>]
 [16 <./figures/diagrammi-sequenza.pdf>] [17 <./figures/diagrammi-sequenza.pdf>]
-<figures/diagrammi-stato.pdf, id=262, page=1, 385.45406pt x 151.95068pt>
+<figures/diagrammi-stato.pdf, id=260, page=1, 385.45406pt x 151.95068pt>
 File: figures/diagrammi-stato.pdf Graphic file (type pdf)
 <use figures/diagrammi-stato.pdf, page 1>
 Package pdftex.def Info: figures/diagrammi-stato.pdf , page1 used on input line
  360.
 (pdftex.def)             Requested size: 385.45311pt x 151.9503pt.
-<figures/diagrammi-stato.pdf, id=263, page=2, 284.96863pt x 68.79903pt>
+<figures/diagrammi-stato.pdf, id=261, page=2, 284.96863pt x 68.79903pt>
 File: figures/diagrammi-stato.pdf Graphic file (type pdf)
 <use figures/diagrammi-stato.pdf, page 2>
 Package pdftex.def Info: figures/diagrammi-stato.pdf , page2 used on input line
  368.
 (pdftex.def)             Requested size: 284.96793pt x 68.79884pt.
-<figures/diagrammi-stato.pdf, id=264, page=3, 412.22607pt x 151.64655pt>
+<figures/diagrammi-stato.pdf, id=262, page=3, 412.22607pt x 151.64655pt>
 File: figures/diagrammi-stato.pdf Graphic file (type pdf)
 <use figures/diagrammi-stato.pdf, page 3>
 Package pdftex.def Info: figures/diagrammi-stato.pdf , page3 used on input line
@@ -520,42 +520,42 @@ re-con-nects au-to-mat-i-cally, and the resynchronization-
  []
 
 [20] [21] [22]
-Overfull \hbox (4.92307pt too wide) in paragraph at lines 447--448
+Overfull \hbox (4.92307pt too wide) in paragraph at lines 443--444
 []\OT1/cmr/bx/n/10.95 Frontend: \OT1/cmr/m/n/10.95 a single-page ap-pli-ca-tion
  in Vue 3 (Com-po-si-tion API, \OT1/cmtt/m/n/10.95 <script setup>\OT1/cmr/m/n/1
 0.95 ),
  []
 
 [23]
-Overfull \hbox (4.15086pt too wide) in paragraph at lines 450--451
+Overfull \hbox (4.15086pt too wide) in paragraph at lines 446--447
 []\OT1/cmr/bx/n/10.95 Distributed in-fras-truc-ture: \OT1/cmr/m/n/10.95 Ku-ber-
 netes, val-i-dated on Minikube, with an ingress-
  []
 
 
-Overfull \hbox (7.18192pt too wide) in paragraph at lines 450--451
+Overfull \hbox (4.20107pt too wide) in paragraph at lines 446--447
 \OT1/cmr/m/n/10.95 nginx Ingress and a Hor-i-zon-talPo-dAu-toscaler fed by \OT1
-/cmtt/m/n/10.95 metrics-server \OT1/cmr/m/n/10.95 (sec-tion []4.5.4[]). 
+/cmtt/m/n/10.95 metrics-server \OT1/cmr/m/n/10.95 (sec-tions []4.5.4[]
  []
 
 
-Overfull \hbox (3.22739pt too wide) in paragraph at lines 471--472
+Overfull \hbox (3.22739pt too wide) in paragraph at lines 467--468
 \OT1/cmr/m/n/10.95 HTTP was cho-sen be-cause ev-ery mu-ta-tion re-quires an un-
 am-bigu-ous, syn-chronous success-
  []
 
 [24]
 LaTeX Font Info:    Trying to load font information for OMS+cmtt on input line 
-477.
-LaTeX Font Info:    No file OMScmtt.fd. on input line 477.
+473.
+LaTeX Font Info:    No file OMScmtt.fd. on input line 473.
 
 
 LaTeX Font Warning: Font shape `OMS/cmtt/m/n' undefined
 (Font)              using `OMS/cmsy/m/n' instead
-(Font)              for symbol `textbraceleft' on input line 477.
+(Font)              for symbol `textbraceleft' on input line 473.
 
 
-Overfull \hbox (0.70552pt too wide) in paragraph at lines 477--478
+Overfull \hbox (0.70552pt too wide) in paragraph at lines 473--474
 []\OT1/cmtt/m/n/10.95 incident[]locked \OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/10.95
  id, lockedBy, ttl\OMS/cmtt/m/n/10.95 g \OT1/cmr/m/n/10.95 / \OT1/cmtt/m/n/10.9
 5 incident[]unlocked \OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/10.95 id\OMS/cmtt/m/n/1
@@ -563,14 +563,14 @@ Overfull \hbox (0.70552pt too wide) in paragraph at lines 477--478
  []
 
 
-Overfull \hbox (45.04701pt too wide) in paragraph at lines 486--487
+Overfull \hbox (33.54964pt too wide) in paragraph at lines 482--483
 \OT1/cmr/m/n/10.95 bod-ies are JSON (e.g., \OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/1
-0.95 "status": "resolved", "version": 3\OMS/cmtt/m/n/10.95 g\OT1/cmr/m/n/10.95 
-), parsed by \OT1/cmtt/m/n/10.95 express.json()
+0.95 "status": "closed", "version": 3\OMS/cmtt/m/n/10.95 g\OT1/cmr/m/n/10.95 ),
+ parsed by \OT1/cmtt/m/n/10.95 express.json()
  []
 
 
-Overfull \hbox (19.86635pt too wide) in paragraph at lines 496--497
+Overfull \hbox (19.86635pt too wide) in paragraph at lines 492--493
 []\OT1/cmtt/m/n/10.95 updateOne(\OMS/cmtt/m/n/10.95 f[]\OT1/cmtt/m/n/10.95 id, 
 version, status: \OMS/cmtt/m/n/10.95 f\TS1/cmtt/m/n/10.95 $\OT1/cmtt/m/n/10.95 
 in: allowed sources\OMS/cmtt/m/n/10.95 gg\OT1/cmtt/m/n/10.95 , \OMS/cmtt/m/n/10
@@ -578,7 +578,7 @@ in: allowed sources\OMS/cmtt/m/n/10.95 gg\OT1/cmtt/m/n/10.95 , \OMS/cmtt/m/n/10
  []
 
 
-Overfull \hbox (6.65791pt too wide) in paragraph at lines 500--501
+Overfull \hbox (6.65791pt too wide) in paragraph at lines 496--497
  \OT1/cmss/bx/n/10.95 Reads.[] \OT1/cmr/m/n/10.95 The snap-shot is \OT1/cmtt/m/
 n/10.95 find(\OMS/cmtt/m/n/10.95 fg\OT1/cmtt/m/n/10.95 ).sort(\OMS/cmtt/m/n/10.
 95 f\OT1/cmtt/m/n/10.95 updatedAt: -1\OMS/cmtt/m/n/10.95 g\OT1/cmtt/m/n/10.95 )
@@ -586,148 +586,148 @@ n/10.95 find(\OMS/cmtt/m/n/10.95 fg\OT1/cmtt/m/n/10.95 ).sort(\OMS/cmtt/m/n/10.
  []
 
 [25]
-Overfull \hbox (16.8735pt too wide) in paragraph at lines 518--519
+Overfull \hbox (16.8735pt too wide) in paragraph at lines 514--515
 []\OT1/cmr/bx/n/10.95 Express: \OT1/cmr/m/n/10.95 an \OT1/cmtt/m/n/10.95 expres
 s.Router() \OT1/cmr/m/n/10.95 mounts ev-ery end-point un-der \OT1/cmtt/m/n/10.9
 5 /api\OT1/cmr/m/n/10.95 ; \OT1/cmtt/m/n/10.95 express.json()
  []
 
 
-Overfull \hbox (59.7407pt too wide) in paragraph at lines 519--520
+Overfull \hbox (59.7407pt too wide) in paragraph at lines 515--516
 \OT1/cmr/m/n/10.95 Re-dis Pub/Sub, \OT1/cmtt/m/n/10.95 io.local.emit() \OT1/cmr
 /m/n/10.95 reaches only the pod's own sock-ets, and \OT1/cmtt/m/n/10.95 io.fetc
 hSockets()
  []
 
 [26]
-Overfull \hbox (5.42525pt too wide) in paragraph at lines 527--528
+Overfull \hbox (5.42525pt too wide) in paragraph at lines 523--524
 []\OT1/cmr/bx/n/10.95 socket.io-client: \OT1/cmr/m/n/10.95 the con-nec-tion is 
 opened with \OT1/cmtt/m/n/10.95 io('/', \OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/10.9
 5 path: '/socket.io',
  []
 
 LaTeX Font Info:    External font `cmex10' loaded for size
-(Font)              <5> on input line 534.
+(Font)              <5> on input line 530.
 
-Underfull \hbox (badness 10000) in paragraph at lines 538--538
+Underfull \hbox (badness 10000) in paragraph at lines 534--534
 \OT1/cmr/m/n/10 figMap, State-fulSet,
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 538--539
+Underfull \hbox (badness 10000) in paragraph at lines 534--535
 []\OT1/cmr/m/n/10 3 mem-bers \OT1/cmtt/m/n/10 --replSet rs0\OT1/cmr/m/n/10 , 1G
 iB PVC
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 538--539
+Underfull \hbox (badness 10000) in paragraph at lines 534--535
 \OT1/cmtt/m/n/10 mongo-rs-init \OT1/cmr/m/n/10 Job (\OT1/cmtt/m/n/10 backoffLim
 it: 5\OT1/cmr/m/n/10 );
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 539--539
+Underfull \hbox (badness 10000) in paragraph at lines 535--535
 []\OT1/cmr/m/n/10 Deployment,
  []
 
 
-Underfull \hbox (badness 6252) in paragraph at lines 541--541
+Underfull \hbox (badness 6252) in paragraph at lines 537--537
 []\OT1/cmr/m/n/10 Deployment, Ser-vice,
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 541--542
+Underfull \hbox (badness 10000) in paragraph at lines 537--538
 []\OT1/cmr/m/n/10 3 repli-cas; \OT1/cmtt/m/n/10 MONGO[]URL\OT1/cmr/m/n/10 , \OT
 1/cmtt/m/n/10 REDIS[]URL\OT1/cmr/m/n/10 ,
  []
 
 
-Underfull \hbox (badness 1931) in paragraph at lines 541--542
+Underfull \hbox (badness 1931) in paragraph at lines 537--538
 \OT1/cmr/m/n/10 ev-ery 5s with \OT1/cmtt/m/n/10 failureThreshold: 3\OT1/cmr/m/n
 /10 ; no
  []
 
 
-Overfull \hbox (9.03328pt too wide) in paragraph at lines 542--542
+Overfull \hbox (9.03328pt too wide) in paragraph at lines 538--538
 []\OT1/cmr/m/n/10 HorizontalPodAutoscaler| 
  []
 
 
-Underfull \hbox (badness 6252) in paragraph at lines 543--543
+Underfull \hbox (badness 6252) in paragraph at lines 539--539
 []\OT1/cmr/m/n/10 Deployment, Ser-vice,
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 543--544
+Underfull \hbox (badness 10000) in paragraph at lines 539--540
 []\OT1/cmr/m/n/10 2 repli-cas; rolling up-date with
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 543--544
+Underfull \hbox (badness 10000) in paragraph at lines 539--540
 \OT1/cmtt/m/n/10 maxUnavailable: 0\OT1/cmr/m/n/10 ; \OT1/cmtt/m/n/10 preStop sl
 eep 5\OT1/cmr/m/n/10 ;
  []
 
 
-Underfull \hbox (badness 4429) in paragraph at lines 544--545
+Underfull \hbox (badness 4429) in paragraph at lines 540--541
 \OT1/cmtt/m/n/10 /socket.io $\OMS/cmsy/m/n/10 !$ \OT1/cmtt/m/n/10 api:3000\OT1/
 cmr/m/n/10 ; cookie affin-ity
  []
 
 
-Overfull \hbox (2.54515pt too wide) in paragraph at lines 534--547
+Overfull \hbox (2.54515pt too wide) in paragraph at lines 530--543
  [][] 
  []
 
 [27]
-Overfull \hbox (9.60168pt too wide) in paragraph at lines 571--572
+Overfull \hbox (9.60168pt too wide) in paragraph at lines 567--568
 []\OT1/cmr/bx/n/10.95 Result: \OT1/cmr/m/n/10.95 passed, since \OT1/cmtt/m/n/10
 .95 SET NX PX \OT1/cmr/m/n/10.95 is atomic and the re-lease emits \OT1/cmtt/m/n
 /10.95 incident[]unlocked
  []
 
 [28]
-Overfull \hbox (91.22052pt too wide) in paragraph at lines 578--579
+Overfull \hbox (91.22052pt too wide) in paragraph at lines 574--575
 \OT1/cmr/m/n/10.95 bob, by-pass-ing the UI, send \OT1/cmtt/m/n/10.95 PATCH /api
 /incidents/<id> \OT1/cmr/m/n/10.95 with \OMS/cmtt/m/n/10.95 f\OT1/cmtt/m/n/10.9
 5 "status":"closed","version":1\OMS/cmtt/m/n/10.95 g\OT1/cmr/m/n/10.95 ;
  []
 
 [29] [30]
-Overfull \hbox (1.40219pt too wide) in paragraph at lines 656--658
+Overfull \hbox (1.40219pt too wide) in paragraph at lines 653--655
 \OT1/cmr/m/n/10.95 The clus-ter runs in a ded-i-cated Minikube pro-file, \OT1/c
 mtt/m/n/10.95 incident-board\OT1/cmr/m/n/10.95 , which ev-ery \OT1/cmtt/m/n/10.
 95 minikube
  []
 
 [31] [32]
-<figures/login.png, id=424, 842.14626pt x 666.49pt>
+<figures/login.png, id=419, 842.14626pt x 666.49pt>
 File: figures/login.png Graphic file (type png)
 <use figures/login.png>
-Package pdftex.def Info: figures/login.png  used on input line 716.
+Package pdftex.def Info: figures/login.png  used on input line 713.
 (pdftex.def)             Requested size: 200.76086pt x 184.33432pt.
-<figures/creazione-accoutn.png, id=427, 736.7525pt x 656.4525pt>
+<figures/creazione-accoutn.png, id=422, 736.7525pt x 656.4525pt>
 File: figures/creazione-accoutn.png Graphic file (type png)
 <use figures/creazione-accoutn.png>
-Package pdftex.def Info: figures/creazione-accoutn.png  used on input line 717.
+Package pdftex.def Info: figures/creazione-accoutn.png  used on input line 714.
 
 (pdftex.def)             Requested size: 200.76086pt x 181.70181pt.
-<figures/board.png, id=430, 1907.125pt x 854.19125pt>
+<figures/board.png, id=425, 1907.125pt x 854.19125pt>
 File: figures/board.png Graphic file (type png)
 <use figures/board.png>
-Package pdftex.def Info: figures/board.png  used on input line 729.
+Package pdftex.def Info: figures/board.png  used on input line 726.
 (pdftex.def)             Requested size: 418.25555pt x 188.97438pt.
  [33 <./figures/login.png> <./figures/creazione-accoutn.png>]
 LaTeX Font Info:    Trying to load font information for OML+cmr on input line 7
-43.
+40.
 
 (/usr/local/texlive/2026/texmf-dist/tex/latex/base/omlcmr.fd
 File: omlcmr.fd 2024/11/19 v2.5n Standard LaTeX font definitions
 )
 LaTeX Font Info:    Font shape `OML/cmr/m/n' in size <10.95> not available
-(Font)              Font shape `OML/cmm/m/it' tried instead on input line 743.
+(Font)              Font shape `OML/cmm/m/it' tried instead on input line 740.
  [34 <./figures/board.png>] [35] [36]
-Overfull \hbox (33.21954pt too wide) in paragraph at lines 823--828
+Overfull \hbox (33.21954pt too wide) in paragraph at lines 819--824
 \OT1/cmr/m/n/10.95 would need to rec-on-cile the op-ti-mistic client-side move 
 with the same claim/release/resolve
  []
@@ -743,8 +743,8 @@ LaTeX Font Warning: Some font shapes were not available, defaults substituted.
 
  ) 
 Here is how much of TeX's memory you used:
- 14386 strings out of 467525
- 268038 string characters out of 5418982
+ 14384 strings out of 467525
+ 268012 string characters out of 5418982
  811224 words of memory out of 5000000
  43031 multiletter control sequences out of 15000+600000
  636522 words of font info for 69 fonts, out of 8000000 for 9000
@@ -771,11 +771,11 @@ l/texlive/2026/texmf-dist/fonts/type1/public/lm/lmtt8.pfb></usr/local/texlive/2
 026/texmf-dist/fonts/type1/public/lm/lmtti10.pfb></usr/local/texlive/2026/texmf
 -dist/fonts/type1/public/cm-super/sfrm1095.pfb></usr/local/texlive/2026/texmf-d
 ist/fonts/type1/public/cm-super/sftt1095.pfb>
-Output written on distributed-systems-final-report.pdf (37 pages, 642195 bytes)
+Output written on distributed-systems-final-report.pdf (37 pages, 642110 bytes)
 .
 PDF statistics:
- 797 PDF objects out of 1000 (max. 8388607)
- 674 compressed objects within 7 object streams
- 159 named destinations out of 1000 (max. 500000)
+ 793 PDF objects out of 1000 (max. 8388607)
+ 670 compressed objects within 7 object streams
+ 157 named destinations out of 1000 (max. 500000)
  639 words of extra memory for PDF output out of 10000 (max. 10000000)
 
