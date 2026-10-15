@@ -1,17 +1,3 @@
-# =========================================================================
-# mongo.yaml - MongoDB come vero Replica Set a 3 nodi
-#
-# Rispetto alla versione precedente (Deployment con 1 solo membro), qui:
-#  - Mongo diventa uno StatefulSet: ogni pod ha identità di rete stabile
-#    (mongo-0, mongo-1, mongo-2) necessaria per un replica set reale.
-#  - Il replica set ha 3 membri -> tollera la perdita di 1 nodo mantenendo
-#    un primary eletto automaticamente (dimostra failover reale).
-#  - Ogni pod ha il proprio PersistentVolumeClaim: i dati sopravvivono al
-#    riavvio/ricreazione del pod (prima erano su storage effimero).
-#  - L'inizializzazione del replica set avviene UNA sola volta tramite un
-#    Job dedicato (prima veniva ritentata da un sidecar per ogni pod).
-# =========================================================================
-
 apiVersion: v1
 kind: Service
 metadata:
@@ -20,8 +6,6 @@ metadata:
   labels:
     app: mongo
 spec:
-  # Headless service: necessario per lo StatefulSet, fornisce i DNS
-  # stabili mongo-0.mongo, mongo-1.mongo, mongo-2.mongo (nel namespace app)
   clusterIP: None
   selector:
     app: mongo
@@ -52,7 +36,7 @@ metadata:
   name: mongo
   namespace: app
 spec:
-  serviceName: mongo          # deve corrispondere al nome della headless service
+  serviceName: mongo          
   replicas: 3
   selector:
     matchLabels:
@@ -80,8 +64,6 @@ spec:
         volumeMounts:
         - name: mongo-data
           mountPath: /data/db
-        # Probe "profonde": verificano che mongod risponda realmente
-        # (ping sul database), non solo che il processo sia in vita.
         livenessProbe:
           exec:
             command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
@@ -96,8 +78,6 @@ spec:
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 3
-  # Ogni pod (mongo-0, mongo-1, mongo-2) ottiene il proprio volume
-  # persistente indipendente: perdere un pod non significa perdere i dati.
   volumeClaimTemplates:
   - metadata:
       name: mongo-data
@@ -107,10 +87,6 @@ spec:
         requests:
           storage: 1Gi
 ---
-# Job "one-shot": inizializza il replica set una sola volta, quando tutti
-# e 3 i membri sono raggiungibili. Se il replica set risulta già
-# inizializzato (es. dopo un riavvio del Job per un motivo qualsiasi),
-# non fa nulla ed esce con successo.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -161,9 +137,6 @@ spec:
         configMap:
           name: mongo-init
 ---
-# Garantisce che, durante drain/manutenzione volontaria dei nodi Minikube,
-# non vengano abbattuti più membri del replica set contemporaneamente
-# (con 3 membri, perdere 2 nodi insieme farebbe perdere il quorum).
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

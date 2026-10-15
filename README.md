@@ -31,7 +31,9 @@ Avvia Minikube con un profilo dedicato e abilita l'addon Ingress, necessario per
 ```
 minikube start -p incident-board
 minikube addons enable ingress -p incident-board
+minikube addons enable metrics-server -p incident-board
 ```
+L'addon `metrics-server` fornisce le metriche di CPU all'HorizontalPodAutoscaler: senza, il target dell'HPA resta `<unknown>` e le repliche `api` non scalano mai.
 ### 2. Creazione del Namespace
 
 Crea il namespace Kubernetes in cui verranno raggruppati tutti i servizi dell'applicazione:
@@ -60,11 +62,13 @@ Attendi che i Pod vengano creati eseguendo ```kubectl get pods -n app```.
 L'Ingress è configurato per rispondere esclusivamente al dominio board.local. Aggiungi questo dominio al tuo file hosts di sistema:
 ```
 echo "127.0.0.1 board.local" | sudo tee -a /etc/hosts
+echo "::1 board.local" | sudo tee -a /etc/hosts
 ```
+La voce IPv6 serve su macOS: per un nome `.local` senza di essa il sistema interroga prima mDNS e ogni risoluzione di `board.local` attende circa 5 secondi.
 
 ### 6. Attivazione del Tunnel e Accesso
 
-Mantieni questo terminale aperto per permettere a Minikube di inoltrare il traffico dal tuo computer locale all'Ingress del cluster:
+Mantieni questo terminale aperto per permettere a Minikube di inoltrare il traffico dal tuo computer locale all'Ingress del cluster. Il tunnel chiede la password di amministratore, perché inoltra le porte privilegiate 80 e 443:
 ```
 minikube tunnel -p incident-board
 ```

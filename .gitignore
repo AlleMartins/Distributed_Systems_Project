@@ -1,20 +1,42 @@
-cat << 'EOF' > .gitignore
 # Dipendenze Node.js
 node_modules/
 
-# File di ambiente (Non pushare mai le password!)
+# File di ambiente (non pushare mai le password!)
 .env
 .env.local
+*.local
 
 # Build di produzione del frontend
 dist/
 dist-ssr/
 
-# File di sistema macOS
-.DS_Store
-
-# Log vari
+# Log
+logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-EOF
+pnpm-debug.log*
+lerna-debug.log*
+
+# File temporanei di LaTeX (doc/): il PDF resta versionato
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+*.out
+*.toc
+
+# File di sistema macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

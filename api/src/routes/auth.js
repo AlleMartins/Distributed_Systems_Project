@@ -1,9 +1,3 @@
-// Rotte di registrazione e login.
-// Ogni modulo di rotte esporta una factory che riceve le dipendenze e
-// restituisce un Router con i path COMPLETI ('/auth/register', non
-// '/register'): index.js li monta tutti sullo stesso apiRouter, quindi gli
-// URL restano identici a prima e non c'è nessun calcolo di prefissi da
-// tenere allineato fra file.
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -32,9 +26,6 @@ const createAuthRouter = (db) => {
           createdAt: new Date()
         });
       } catch (err) {
-        // L'unicità è garantita dall'indice, non da un controllo
-        // applicativo: con più repliche API due registrazioni concorrenti
-        // dello stesso username passerebbero entrambe un check "esiste già?".
         if (err.code === 11000) {
           return res.status(409).json({ error: 'Username già in uso' });
         }
@@ -55,8 +46,7 @@ const createAuthRouter = (db) => {
       }
 
       const user = await db.collection('users').findOne({ username: username.trim() });
-      // Stesso messaggio di errore sia per utente inesistente sia per
-      // password errata: evita di rivelare quali username sono registrati.
+     
       if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
         return res.status(401).json({ error: 'Credenziali non valide' });
       }

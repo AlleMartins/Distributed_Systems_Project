@@ -1,15 +1,3 @@
-// Probe di liveness e readiness.
-// - livenessProbe: shallow, verifica solo che Express risponda. Un
-//   disservizio temporaneo di una dipendenza non deve causare riavvii.
-// - readinessProbe: deep. Oltre a Mongo e Redis verifica anche il change
-//   stream: un pod che non riceve più eventi serve dati fermi al momento
-//   dell'idratazione, quindi è meglio che esca dal Service (senza essere
-//   riavviato) e rientri quando si è ripristinato.
-//
-// `isChangeStreamHealthy` arriva come funzione e non come booleano: un
-// booleano verrebbe copiato al momento del wiring e resterebbe congelato
-// al suo valore iniziale, rendendo la readiness cieca proprio al guasto
-// che deve rilevare.
 const express = require('express');
 
 const createHealthRouter = ({ db, pubClient, isChangeStreamHealthy }) => {

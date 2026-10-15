@@ -16,7 +16,7 @@ spec:
       containers:
       - name: api
         image: api:latest
-        imagePullPolicy: Never # Fondamentale: impedisce a K8s di cercare l'immagine su internet
+        imagePullPolicy: Never 
         env:
         - name: MONGO_URL
           value: "mongodb://mongo-0.mongo:27017,mongo-1.mongo:27017,mongo-2.mongo:27017/app?replicaSet=rs0"
@@ -36,14 +36,6 @@ spec:
             cpu: "100m"
           limits:
             cpu: "500m"
-        # Probes per l'Alta Affidabilità (HA)
-        # - livenessProbe: shallow, verifica solo che Express risponda.
-        #   Se fallisse su un check "profondo", un disservizio temporaneo
-        #   di Mongo/Redis causerebbe riavvii inutili del pod.
-        # - readinessProbe: deep, verifica anche Mongo e Redis. Se le
-        #   dipendenze non rispondono, il pod esce dal Service (niente
-        #   traffico) senza essere riavviato, e rientra da solo appena
-        #   le dipendenze tornano disponibili.
         livenessProbe:
           httpGet:
             path: /api/health
@@ -71,13 +63,6 @@ spec:
   - port: 3000
     targetPort: 3000
 ---
-# Stesso scopo del mongo-pdb, ma con una soglia RELATIVA invece che
-# assoluta: le repliche API non sono un numero fisso, l'HPA le scala da 3
-# a 10. `minAvailable: 2` sarebbe troppo lasco a 10 repliche (un drain
-# potrebbe portarne via 8 insieme) e inutilmente stretto se l'HPA
-# scendesse; `maxUnavailable: 1` si adatta da solo al numero corrente.
-# Vale solo per le disruption volontarie: i rolling update restano
-# governati dalla strategy del Deployment.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
