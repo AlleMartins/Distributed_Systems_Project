@@ -645,7 +645,6 @@ Checked directly in the browser, as they involve no distributed mechanism:
   \item \textbf{Minikube}
   \item \textbf{kubectl}
   \item \textbf{Git}
-  \item \textbf{Node.js} 20.19+ or 22.12+, with npm, only to run the API or the frontend outside containers. The bounds come from the MongoDB driver~7 (\texttt{>=20.19.0}) and Vite~8 (\texttt{\textasciicircum 20.19.0 || >=22.12.0}).
 \end{itemize}
 
 \subsection{Cluster Setup}\label{cluster-setup}
@@ -674,14 +673,19 @@ Since the \texttt{api} and \texttt{web} manifests set \texttt{imagePullPolicy: N
 
 \subsection{Deploying the Kubernetes Manifests}\label{deploying-manifests}
 
-From the project root, all the manifests are applied at once, then the pods are followed until they are \texttt{Running}:
+From the project root, all the manifests are applied at once:
 %
 \begin{verbatim}
   kubectl apply -f k8s/ -n app
+\end{verbatim}
+%
+The following command shows the pods in real time, printing a new line at every change of state; it does not terminate on its own and is stopped with Ctrl+C:
+%
+\begin{verbatim}
   kubectl get pods -n app -w
 \end{verbatim}
 %
-Until the \texttt{mongo-rs-init} Job has initialized the replica set, the \texttt{api} pods exit at startup and are restarted by Kubernetes; they settle on their own once MongoDB is ready.
+The deployment is complete when every pod is \texttt{Running} and ready (\texttt{1/1}), except the \texttt{mongo-rs-init} Job's pod, which ends as \texttt{Completed}. Until that Job has initialized the replica set, the \texttt{api} pods exit at startup and are restarted by Kubernetes, so they may briefly appear as \texttt{Error} or \texttt{CrashLoopBackOff}; they settle on their own once MongoDB is ready.
 
 \subsection{Reaching the Board}\label{reaching-board}
 
